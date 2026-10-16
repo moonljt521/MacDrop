@@ -7,7 +7,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var status: StatusItemController!
     private let engine = TransferEngine.shared
 
-    private var pendingMeta: [String: (name: String, root: String)] = [:]
+    private var pendingMeta: [String: (name: String, root: String, total: Int64)] = [:]
+    /// 接收进度节流：只有整数百分比变化才刷新 UI
+    private var lastRecvPercent = -1
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -62,6 +64,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 12.5) {
             panel.finishProgress(text: "已发送 demo.txt")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 13.5) {
+            panel.debugShowPicker()
+            Logger.write("UI 探针：多设备选择器态（保持到 16.0s）")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15.5) {
+            panel.debugSnapshot(to: dir + "/picker.png")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 16.5) {
+            panel.debugCancelPicker()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 17.5) {
+            panel.beginReceive()
+            Logger.write("UI 探针：接收开始态（保持到 20.5s）")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 18.2) {
+            panel.updateReceiveProgress(0.35)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 19.0) {
+            panel.debugSnapshot(to: dir + "/receive.png")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 19.5) {
+            panel.updateReceiveProgress(0.80)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20.5) {
+            panel.finishProgress(text: "已接收：合同扫描件.pdf")
             Logger.write("UI 探针：结束")
         }
     }
@@ -184,8 +212,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             do {
                 try engine.beginReceive(transferID: id, fileName: name, total: size)
-                pendingMeta[id] = (name, req.query["root"] ?? "")
+                pendingMeta[id] = (name, req.query["root"] ?? "", size)
+                lastRecvPercent = -1
                 Logger.write("开始接收 \(name)（\(size) 字节）")
+                DispatchQueue.main.async { [weak self] in
+                    self?.status.beginReceive()
+                }
                 return .json(["ok": true])
             } catch {
                 return .failure(error.localizedDescription, status: 500)
@@ -199,6 +231,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             do {
                 try engine.appendChunk(transferID: id, offset: offset, data: req.body)
+                if let total = pendingMeta[id]?.total, total > 0 {
+                    let percent = Int(min(100, (offset + Int64(req.body.count)) * 100 / total))
+                    if percent != lastRecvPercent {
+                        lastRecvPercent = percent
+                        DispatchQueue.main.async { [weak self] in
+                            self?.status.showReceiveProgress(Double(percent) / 100)
+                        }
+                    }
+                }
                 return .json(["ok": true])
             } catch {
                 return .failure(error.localizedDescription, status: 500)
@@ -213,7 +254,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                     rootName: meta?.root)
                 Logger.write("接收完成 → \(dest.path)")
                 DispatchQueue.main.async { [weak self] in
-                    self?.status.showResult("已接收 \(dest.lastPathComponent)")
+                    self?.status.showResult("已接收：\(dest.lastPathComponent)")
                     self?.status.onReceived?(dest)
                 }
                 return .json(["ok": true, "path": dest.path])

@@ -63,6 +63,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     func showProgress(_ fraction: Double) { panel.updateProgress(fraction) }
     func showResult(_ text: String, isError: Bool = false) { panel.finishProgress(text: text, isError: isError) }
     func refreshPanelStatus() { panel.refreshStatus() }
+    func beginReceive() { panel.beginReceive() }
+    func showReceiveProgress(_ fraction: Double) { panel.updateReceiveProgress(fraction) }
 
     // MARK: - 菜单
 

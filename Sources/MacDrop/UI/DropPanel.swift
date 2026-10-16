@@ -12,7 +12,8 @@ import AppKit
 ///   2. 顶部一道极淡的白色光泽，给玻璃一点纵深；
 ///   3. 拖入时只做「变亮 + 图标弹性放大」，不用任何彩色描边/色块；
 ///   4. 展开/收起时窗口 frame 与圆角同步做 0.22s 平滑形变，不是硬切；
-///   5. 进度条自绘圆角胶囊，替代观感偏工业的 NSProgressIndicator。
+///   5. 进度条自绘圆角胶囊，替代观感偏工业的 NSProgressIndicator；
+///   6. 多台 Mac 在线时拖入后先弹出设备列表点选目标（只有一台则直接发送）。
 ///
 /// 关于能力边界（很重要）：
 /// macOS 的跨机器拖放事件由系统 sharingd 在系统层广播，第三方 App 无法自行发起。
@@ -35,17 +36,31 @@ final class DropPanel: NSObject {
     private var progressBar: RoundedProgressBar!
 
     private var peers: [Peer] = []
-    private var activePeer: Peer?
+
+    /// 多设备选择器状态
+    private var pickerMode = false
+    private var pendingURLs: [URL] = []
+    private var pickerRows: [DeviceRow] = []
+    private var pickerCancelRow: DeviceRow?
+    private var clickMonitor: Any?
+    /// 面板当前尺寸（收起圆形 / 展开 / 选择器三种高度）
+    private var currentSize: NSSize!
 
     /// 展开尺寸（完整形态）与收起尺寸（圆形小浮窗）
     private static let expandedSize = NSSize(width: 300, height: 132)
     private static let collapsedSize = NSSize(width: 64, height: 64)
     private static let expandedRadius: CGFloat = 16
     private static let morphDuration: TimeInterval = 0.22
+    /// 设备列表最多显示台数（再多的场景极少，超出只显示前几台）
+    private static let maxPickerRows = 4
 
     private var isExpanded = false
     private var isBusy = false          // 传输中/结果展示中，期间不收回
     private var isDragHovering = false  // 有拖拽悬停
+    /// 忙碌代际：新的拖放/进度会作废旧的"3 秒后收起"定时器
+    private var busyGeneration = 0
+    /// 面板原本隐藏、因为收/发进度被临时唤出：结束后重新隐藏
+    private var autoShownForTransfer = false
     private var pendingCollapse: DispatchWorkItem?
 
     static let shared = DropPanel()
@@ -166,6 +181,7 @@ final class DropPanel: NSObject {
         dropView.addSubview(progressBar)
 
         panel.contentView = container
+        currentSize = Self.collapsedSize
         layoutSubviews()
 
         // 屏幕右上角
@@ -199,6 +215,19 @@ final class DropPanel: NSObject {
     private func layoutSubviews() {
         guard panel != nil else { return }
         let b = dropView.bounds
+
+        if pickerMode {
+            // 选择器：顶部问题文案 + 设备行 + 底部取消行
+            statusLabel.frame = NSRect(x: 10, y: b.height - 32, width: b.width - 20, height: 20)
+            var y = b.height - 64
+            for row in pickerRows {
+                row.frame = NSRect(x: 14, y: y, width: b.width - 28, height: 28)
+                y -= 34
+            }
+            pickerCancelRow?.frame = NSRect(x: 14, y: 12, width: b.width - 28, height: 28)
+            return
+        }
+
         deviceLabel.frame = NSRect(x: 10, y: b.height - 30, width: b.width - 20, height: 18)
         statusLabel.frame = NSRect(x: 10, y: b.height - 64, width: b.width - 20, height: 22)
         progressBar.frame = NSRect(x: 34, y: b.height - 92, width: b.width - 68, height: 8)
@@ -208,17 +237,33 @@ final class DropPanel: NSObject {
     }
 
     /// 展开/收起：保持右上角不动，窗口向左下生长、向右上回收。
-    /// 窗口 frame 与圆角同步形变，避免硬切。
     private func setExpanded(_ expanded: Bool, animated: Bool) {
         guard panel != nil, expanded != isExpanded else { return }
         isExpanded = expanded
 
-        let size = expanded ? Self.expandedSize : Self.collapsedSize
+        setExpandedSize(expanded ? Self.expandedSize : Self.collapsedSize,
+                        animated: animated)
+
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = animated ? Self.morphDuration : 0
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            deviceLabel.animator().alphaValue = expanded ? 1 : 0
+            statusLabel.animator().alphaValue = expanded ? 1 : 0
+            iconHolder.animator().alphaValue = expanded ? 0 : 1
+        }
+    }
+
+    /// 改变面板尺寸：保持右上角不动，窗口 frame 与圆角同步形变，避免硬切。
+    private func setExpandedSize(_ size: NSSize, animated: Bool) {
+        guard panel != nil, size != currentSize else { return }
+        currentSize = size
+
         let target = NSRect(x: panel.frame.maxX - size.width,
                             y: panel.frame.maxY - size.height,
                             width: size.width,
                             height: size.height)
-        let newRadius = expanded ? Self.expandedRadius : size.width / 2
+        let isCircle = abs(size.width - size.height) < 1
+        let newRadius: CGFloat = isCircle ? size.width / 2 : Self.expandedRadius
         let oldRadius = container.layer?.cornerRadius ?? newRadius
         let duration = animated ? Self.morphDuration : 0
 
@@ -226,9 +271,6 @@ final class DropPanel: NSObject {
             ctx.duration = duration
             ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             panel.animator().setFrame(target, display: true)
-            deviceLabel.animator().alphaValue = expanded ? 1 : 0
-            statusLabel.animator().alphaValue = expanded ? 1 : 0
-            iconHolder.animator().alphaValue = expanded ? 0 : 1
         }, completionHandler: { [weak self] in
             guard let self else { return }
             self.layoutSubviews()
@@ -249,6 +291,7 @@ final class DropPanel: NSObject {
 
     private func dragEntered() {
         isDragHovering = true
+        autoShownForTransfer = false  // 用户自己来拖了，之后保持可见
         pendingCollapse?.cancel()
         pendingCollapse = nil
         setHovering(true)
@@ -309,7 +352,13 @@ final class DropPanel: NSObject {
         }
     }
 
-    func hide() { panel.orderOut(nil) }
+    func hide() {
+        if pickerMode {
+            tearDownPicker()
+            isBusy = false
+        }
+        panel.orderOut(nil)
+    }
     func toggle() { isVisible ? hide() : show() }
     var isVisible: Bool { panel.isVisible }
 
@@ -317,7 +366,13 @@ final class DropPanel: NSObject {
 
     func updatePeers(_ peers: [Peer]) {
         self.peers = peers
-        if activePeer == nil { activePeer = peers.first }
+        if pickerMode {
+            if peers.isEmpty {
+                cancelPicker()
+            } else {
+                rebuildPicker()
+            }
+        }
         refreshStatus()
     }
 
@@ -325,25 +380,63 @@ final class DropPanel: NSObject {
         deviceLabel.stringValue = name
     }
 
-    func updateProgress(_ fraction: Double) {
-        isBusy = true
-        if !isExpanded { setExpanded(true, animated: true) }
+    /// 发送中进度（本机把文件发出去）
+    func updateProgress(_ fraction: Double) { updateProgress(fraction, verb: "传输中") }
+
+    /// 接收中进度（其他 Mac 发过来的文件）
+    func updateReceiveProgress(_ fraction: Double) { updateProgress(fraction, verb: "接收中") }
+
+    private func updateProgress(_ fraction: Double, verb: String) {
+        prepareForStatusUI()
         progressBar.isHidden = false
         progressBar.setFraction(fraction, animated: true)
-        statusLabel.stringValue = String(format: "传输中 %.0f%%", fraction * 100)
+        statusLabel.textColor = .labelColor
+        statusLabel.stringValue = String(format: "\(verb) %.0f%%", fraction * 100)
+    }
+
+    /// 开始接收：即使面板原来隐藏/收起，也自动出现并展开
+    func beginReceive() {
+        prepareForStatusUI()
+        progressBar.isHidden = false
+        progressBar.setFraction(0, animated: false)
+        statusLabel.textColor = .labelColor
+        statusLabel.stringValue = "正在接收…"
+    }
+
+    /// 进度/结果出现前：确保可见、展开、尺寸正确（隐藏则临时唤出，结束后再隐藏）
+    private func prepareForStatusUI() {
+        isBusy = true
+        busyGeneration += 1
+        if pickerMode { tearDownPicker() }
+        if !isVisible {
+            autoShownForTransfer = true
+            show()
+        }
+        if !isExpanded {
+            setExpanded(true, animated: true)
+        } else if currentSize != Self.expandedSize {
+            setExpandedSize(Self.expandedSize, animated: true)
+        }
     }
 
     func finishProgress(text: String, isError: Bool = false) {
+        prepareForStatusUI()
         progressBar.isHidden = true
         progressBar.setFraction(0, animated: false)
         statusLabel.stringValue = text
         statusLabel.textColor = isError ? .systemRed : .secondaryLabelColor
-        isBusy = true
+        let gen = busyGeneration
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            guard let self else { return }
+            guard let self, gen == self.busyGeneration, !self.pickerMode else { return }
             self.isBusy = false
             self.refreshStatus()
-            if !self.isDragHovering { self.collapse() }
+            guard !self.isDragHovering else { return }
+            if self.autoShownForTransfer {
+                self.autoShownForTransfer = false
+                self.hide()
+            } else {
+                self.collapse()
+            }
         }
     }
 
@@ -352,9 +445,11 @@ final class DropPanel: NSObject {
         if peers.isEmpty {
             statusLabel.stringValue = "没发现其他 Mac"
             statusLabel.font = .systemFont(ofSize: 13.5)
+        } else if peers.count == 1 {
+            statusLabel.stringValue = "拖到这里 → \(peers[0].name)"
+            statusLabel.font = .systemFont(ofSize: 13.5, weight: .medium)
         } else {
-            let name = activePeer?.name ?? peers[0].name
-            statusLabel.stringValue = "拖到这里 → \(name)"
+            statusLabel.stringValue = "拖到这里（\(peers.count) 台 Mac 可选）"
             statusLabel.font = .systemFont(ofSize: 13.5, weight: .medium)
         }
         layoutSubviews()
@@ -364,13 +459,122 @@ final class DropPanel: NSObject {
 
     private func handleLocalDrop(_ urls: [URL]) {
         isBusy = true
-        guard let peer = activePeer ?? peers.first else {
+        busyGeneration += 1
+        guard !peers.isEmpty else {
             finishProgress(text: "没发现其他 Mac", isError: true)
             NSSound.beep()
             return
         }
+        if peers.count == 1 {
+            statusLabel.stringValue = "准备发送…"
+            onSend?(urls, peers[0])
+            return
+        }
+        // 多台在线：先让用户选目标
+        showPicker(for: urls)
+    }
+
+    // MARK: - 多设备选择器
+
+    /// 多台 Mac 在线时，拖入后弹出的设备列表（AirDrop 式点选目标）
+    private func showPicker(for urls: [URL]) {
+        pendingURLs = urls
+        isBusy = true
+        pickerMode = true
+        rebuildPicker()
+        setExpanded(true, animated: true)
+        // 标题占用了设备名的位置，淡出避免叠字
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.15
+            deviceLabel.animator().alphaValue = 0
+        }
+        setExpandedSize(Self.pickerSize(deviceCount: peers.count), animated: true)
+        startClickMonitor()
+    }
+
+    private func rebuildPicker() {
+        for row in pickerRows { row.removeFromSuperview() }
+        pickerRows = []
+        pickerCancelRow?.removeFromSuperview()
+
+        statusLabel.textColor = .labelColor
+        statusLabel.stringValue = "发送到哪台 Mac？"
+        statusLabel.font = .systemFont(ofSize: 13.5, weight: .medium)
+
+        for peer in peers.prefix(Self.maxPickerRows) {
+            let row = DeviceRow(title: peer.name, symbol: "desktopcomputer")
+            row.onClick = { [weak self] in self?.choose(peer) }
+            dropView.addSubview(row)
+            pickerRows.append(row)
+        }
+        let cancel = DeviceRow(title: "取消", symbol: nil, secondary: true)
+        cancel.onClick = { [weak self] in self?.cancelPicker() }
+        dropView.addSubview(cancel)
+        pickerCancelRow = cancel
+
+        if pickerMode {
+            setExpandedSize(Self.pickerSize(deviceCount: peers.count), animated: true)
+        }
+        layoutSubviews()
+    }
+
+    private static func pickerSize(deviceCount: Int) -> NSSize {
+        let n = min(deviceCount, maxPickerRows)
+        let height = 64 + CGFloat(n - 1) * 34 + 28 + 20
+        return NSSize(width: expandedSize.width, height: height)
+    }
+
+    private func choose(_ peer: Peer) {
+        let urls = pendingURLs
+        tearDownPicker()
+        guard !urls.isEmpty else {
+            isBusy = false
+            refreshStatus()
+            return
+        }
         statusLabel.stringValue = "准备发送…"
         onSend?(urls, peer)
+    }
+
+    private func cancelPicker() {
+        tearDownPicker()
+        isBusy = false
+        refreshStatus()
+        if isVisible, !isDragHovering { setExpanded(false, animated: true) }
+    }
+
+    /// 清掉选择器 UI 与状态（不动 isBusy，由调用方决定）
+    private func tearDownPicker() {
+        stopClickMonitor()
+        pickerMode = false
+        pendingURLs = []
+        for row in pickerRows { row.removeFromSuperview() }
+        pickerRows = []
+        pickerCancelRow?.removeFromSuperview()
+        pickerCancelRow = nil
+        deviceLabel.alphaValue = isExpanded ? 1 : 0
+        layoutSubviews()
+    }
+
+    private func startClickMonitor() {
+        stopClickMonitor()
+        // 点击面板之外的任何地方 = 取消选择
+        clickMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self, self.pickerMode else { return }
+                if !self.panel.frame.contains(NSEvent.mouseLocation) {
+                    self.cancelPicker()
+                }
+            }
+        }
+    }
+
+    private func stopClickMonitor() {
+        if let m = clickMonitor {
+            NSEvent.removeMonitor(m)
+            clickMonitor = nil
+        }
     }
 
     private func handleCrossMachineDrop(_ names: [String]) {
@@ -390,6 +594,20 @@ final class DropPanel: NSObject {
             collapse()
         }
     }
+
+    /// 测试钩子：用假的"三台设备在线"数据弹出选择器，检查布局
+    func debugShowPicker() {
+        let fake = [
+            Peer(host: "10.0.1.118", port: 52345, name: "moon_air的MacBook Air"),
+            Peer(host: "10.0.1.120", port: 52345, name: "客厅的 Mac mini"),
+            Peer(host: "10.0.1.131", port: 52345, name: "MacBook Pro（会议室）")
+        ]
+        updatePeers(fake)
+        showPicker(for: [URL(fileURLWithPath: "/tmp/demo.txt")])
+    }
+
+    /// 测试钩子：关闭选择器
+    func debugCancelPicker() { cancelPicker() }
 
     /// 把当前面板的图层树渲染成 PNG（不含毛玻璃底，用灰白棋盘衬底）。
     /// 仅由 AppDelegate 的 MACDROP_UI_PROBE 测试钩子调用，正常运行时不会触发。
@@ -496,12 +714,17 @@ final class DropView: NSView {
         layer?.add(spring, forKey: "dropBounce")
     }
 
-    // MARK: - 鼠标：整块面板都能拖动窗口
+    // MARK: - 鼠标：整块面板都能拖动窗口（选择器行除外）
 
-    /// 所有鼠标事件都先落到本视图（图标、文字不拦截），
+    /// 除设备列表行外，所有鼠标事件都先落到本视图（图标、文字不拦截），
     /// 按下即进入系统拖拽，保证圆形浮窗任意位置都能拖着走。
     override func hitTest(_ point: NSPoint) -> NSView? {
-        bounds.contains(convert(point, from: superview)) ? self : nil
+        var v = super.hitTest(point)
+        while let cur = v, cur !== self {
+            if cur is DeviceRow { return cur }
+            v = cur.superview
+        }
+        return bounds.contains(convert(point, from: superview)) ? self : nil
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -510,6 +733,79 @@ final class DropView: NSView {
 
     override var mouseDownCanMoveWindow: Bool { true }
     override var acceptsFirstResponder: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// 设备列表行：圆角条目 + 悬停高亮 + 手型光标 + 点击回调
+final class DeviceRow: NSView {
+
+    var onClick: (() -> Void)?
+
+    private let nameLabel = NSTextField(labelWithString: "")
+    private let iconView = NSImageView()
+    private let hasIcon: Bool
+
+    init(title: String, symbol: String?, secondary: Bool = false) {
+        hasIcon = symbol != nil
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.07).cgColor
+
+        nameLabel.stringValue = title
+        nameLabel.font = .systemFont(ofSize: 12.5, weight: secondary ? .regular : .medium)
+        nameLabel.textColor = secondary
+            ? NSColor.white.withAlphaComponent(0.72)
+            : NSColor.white
+        nameLabel.lineBreakMode = .byTruncatingMiddle
+        if !hasIcon { nameLabel.alignment = .center }
+        addSubview(nameLabel)
+
+        if let symbol {
+            iconView.image = NSImage(systemSymbolName: symbol,
+                                     accessibilityDescription: nil)?
+                .withSymbolConfiguration(
+                    NSImage.SymbolConfiguration(pointSize: 13, weight: .medium))
+            iconView.contentTintColor = NSColor.white.withAlphaComponent(0.6)
+            addSubview(iconView)
+        }
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        let h = bounds.height
+        if hasIcon {
+            iconView.frame = NSRect(x: 12, y: (h - 16) / 2, width: 16, height: 16)
+            nameLabel.frame = NSRect(x: 36, y: (h - 16) / 2, width: bounds.width - 48, height: 16)
+        } else {
+            nameLabel.frame = NSRect(x: 12, y: (h - 16) / 2, width: bounds.width - 24, height: 16)
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas { removeTrackingArea(area) }
+        addTrackingArea(NSTrackingArea(rect: .zero,
+                                       options: [.mouseEnteredAndExited, .cursorUpdate,
+                                                 .activeAlways, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) { setHovered(true) }
+    override func mouseExited(with event: NSEvent) { setHovered(false) }
+    override func cursorUpdate(with event: NSEvent) { NSCursor.pointingHand.set() }
+
+    override func mouseDown(with event: NSEvent) { onClick?() }
+
+    private func setHovered(_ on: Bool) {
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.12)
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(on ? 0.16 : 0.07).cgColor
+        CATransaction.commit()
+    }
+
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
