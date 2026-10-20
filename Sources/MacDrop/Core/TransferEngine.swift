@@ -66,14 +66,27 @@ final class TransferEngine {
     }
 
     /// 完成并原子移动到目标目录。返回最终路径。
+    /// expectedSize 不为空时先校验落盘字节数，不完整就报错并删掉半截文件。
     @discardableResult
-    func finishReceive(transferID: String, fileName: String, rootName: String?) throws -> URL {
+    func finishReceive(transferID: String, fileName: String, rootName: String?,
+                       expectedSize: Int64? = nil) throws -> URL {
         lock.lock()
         let tmp = staging.removeValue(forKey: transferID)
         lock.unlock()
         guard let tmp else {
             throw NSError(domain: "MacDrop", code: 404,
                           userInfo: [NSLocalizedDescriptionKey: "未知传输 ID"])
+        }
+
+        if let expectedSize {
+            let attrs = try? fm.attributesOfItem(atPath: tmp.path)
+            let got = (attrs?[.size] as? NSNumber)?.int64Value ?? -1
+            guard got == expectedSize else {
+                try? fm.removeItem(at: tmp)
+                throw NSError(domain: "MacDrop", code: 500, userInfo: [
+                    NSLocalizedDescriptionKey: "文件不完整：已收 \(got) / \(expectedSize) 字节"
+                ])
+            }
         }
 
         let base = Config.shared.downloadURL
@@ -205,19 +218,36 @@ final class TransferEngine {
                                         userInfo: [NSLocalizedDescriptionKey: "无法读取文件"])))
             return
         }
-        defer { try? fh.close() }
 
         var offset: Int64 = 0
         var localState = state
 
+        // 本方法是同步的：分块是异步逐个发出的，句柄必须活到最后一个分块发完。
+        // 不能在函数返回时关闭（defer），否则第二块开始读取就会失败。
+        func finishAndClose() {
+            finish(transferID: transferID, baseURL: baseURL) { result in
+                try? fh.close()
+                completion(result)
+            }
+        }
+
+        func failAndClose(_ error: Error) {
+            try? fh.close()
+            completion(.failure(error))
+        }
+
         func sendNext() {
             guard offset < item.size else {
-                finish(transferID: transferID, baseURL: baseURL, completion: completion)
+                finishAndClose()
                 return
             }
             let want = Int64(chunkSize)
             guard let data = try? fh.read(upToCount: Int(want)), !data.isEmpty else {
-                return finish(transferID: transferID, baseURL: baseURL, completion: completion)
+                // 读到一半提前结束说明源文件变了，绝不能当成功收尾（否则对端留下截断文件）
+                failAndClose(NSError(domain: "MacDrop", code: 500, userInfo: [
+                    NSLocalizedDescriptionKey: "读取提前结束（\(offset)/\(item.size) 字节）"
+                ]))
+                return
             }
             let currentOffset = offset
             offset += Int64(data.count)
@@ -228,9 +258,9 @@ final class TransferEngine {
             req.setValue(String(data.count), forHTTPHeaderField: "Content-Length")
 
             URLSession.shared.uploadTask(with: req, from: data) { _, resp, err in
-                if let err { return completion(.failure(err)) }
+                if let err { return failAndClose(err) }
                 guard let code = (resp as? HTTPURLResponse)?.statusCode, (200..<300).contains(code) else {
-                    return completion(.failure(URLError(.badServerResponse)))
+                    return failAndClose(URLError(.badServerResponse))
                 }
                 localState.sentBytes += Int64(data.count)
                 DispatchQueue.main.async { progress(localState) }

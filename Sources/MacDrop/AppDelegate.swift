@@ -251,7 +251,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 let dest = try engine.finishReceive(transferID: id,
                                                     fileName: meta?.name ?? id,
-                                                    rootName: meta?.root)
+                                                    rootName: meta?.root,
+                                                    expectedSize: meta?.total)
                 Logger.write("接收完成 → \(dest.path)")
                 DispatchQueue.main.async { [weak self] in
                     self?.status.showResult("已接收：\(dest.lastPathComponent)")
