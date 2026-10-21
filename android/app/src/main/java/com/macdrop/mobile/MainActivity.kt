@@ -16,6 +16,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
@@ -73,6 +74,7 @@ class MainActivity : Activity() {
     private var sendingText = ""
     private var sendResult = ""
     private var lastReceiveResult = ""
+    private var pendingInstall: ReceivedEntry? = null
 
     private val client = TransferClient()
     private val store by lazy { MediaStoreStore(this) }
@@ -111,6 +113,15 @@ class MainActivity : Activity() {
         if (ReceiverRuntime.port > 0) startDiscovery(ReceiverRuntime.port)
         refreshRuntime()
         refreshReceived()
+        // 从「安装未知应用」设置页返回：已授权就接着装，未授权则明确告知
+        pendingInstall?.let { entry ->
+            pendingInstall = null
+            if (packageManager.canRequestPackageInstalls()) {
+                launchInstaller(entry)
+            } else {
+                toast("尚未允许安装未知应用")
+            }
+        }
     }
 
     override fun onPause() {
@@ -840,6 +851,7 @@ class MainActivity : Activity() {
         receivedHint.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
 
         val formatter = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+        val swipeRows = mutableListOf<SwipeRowLayout>()
         items.forEachIndexed { index, entry ->
             if (index > 0) {
                 receivedContainer.addView(View(this).apply {
@@ -853,17 +865,9 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(8), dp(10), dp(8), dp(10))
-                background = GradientDrawable().apply {
-                    setColor(Color.TRANSPARENT)
-                    cornerRadius = dp(10).toFloat()
-                }
+                setBackgroundColor(Color.WHITE)
                 isClickable = true
-                isLongClickable = true
                 setOnClickListener { openEntry(entry) }
-                setOnLongClickListener {
-                    confirmDelete(entry)
-                    true
-                }
             }
 
             val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -881,19 +885,28 @@ class MainActivity : Activity() {
             })
             row.addView(column, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
-            row.addView(TextView(this).apply {
-                text = "分享"
-                textSize = 13f
-                setTextColor(ACCENT)
-                setPadding(dp(12), dp(8), dp(12), dp(8))
-                isClickable = true
-                setOnClickListener { shareEntry(entry) }
-            })
-            receivedContainer.addView(row)
+            if (isApk(entry)) {
+                row.addView(actionLabel("安装", ACCENT) { installApk(entry) })
+                row.addView(actionLabel("分享", SECONDARY) { shareEntry(entry) })
+            } else {
+                row.addView(actionLabel("分享", ACCENT) { shareEntry(entry) })
+            }
+
+            val swipeRow = SwipeRowLayout(this).apply {
+                setForeground(row)
+                onDelete = { deleteEntry(entry) }
+                onOpen = { swipeRows.forEach { other -> if (other !== this) other.close() } }
+            }
+            swipeRows.add(swipeRow)
+            receivedContainer.addView(swipeRow)
         }
     }
 
     private fun openEntry(entry: ReceivedEntry) {
+        if (isApk(entry)) {
+            installApk(entry)
+            return
+        }
         val mime = contentResolver.getType(entry.uri) ?: "*/*"
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(entry.uri, mime)
@@ -904,6 +917,95 @@ class MainActivity : Activity() {
         } catch (_: ActivityNotFoundException) {
             toast("没有可打开此文件的应用")
             shareEntry(entry)
+        } catch (_: Exception) {
+            toast("文件不可用，可能已被移动或删除")
+            refreshReceived()
+        }
+    }
+
+    // MARK: - 安装 APK
+
+    private fun actionLabel(label: String, color: Int, action: () -> Unit): TextView =
+        TextView(this).apply {
+            text = label
+            textSize = 13f
+            setTextColor(color)
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            isClickable = true
+            setOnClickListener { action() }
+        }
+
+    private fun isApk(entry: ReceivedEntry): Boolean =
+        entry.name.endsWith(".apk", ignoreCase = true)
+
+    private fun installApk(entry: ReceivedEntry) {
+        if (!packageManager.canRequestPackageInstalls()) {
+            pendingInstall = entry
+            AlertDialog.Builder(this)
+                .setTitle("需要安装权限")
+                .setMessage("系统默认禁止应用安装 APK。请在设置中允许 MoonDrop「安装未知应用」，返回后会自动继续安装。")
+                .setPositiveButton("去设置") { _, _ -> openInstallPermissionSettings() }
+                .setNegativeButton("取消") { _, _ -> pendingInstall = null }
+                .setOnCancelListener { pendingInstall = null }
+                .show()
+            return
+        }
+        launchInstaller(entry)
+    }
+
+    private fun launchInstaller(entry: ReceivedEntry) {
+        // ACTION_INSTALL_PACKAGE 只由系统安装器处理，避免 ACTION_VIEW 弹出
+        // 包含 MoonDrop 自己的「打开方式」选择框
+        val installer = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+            setDataAndType(entry.uri, APK_MIME)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            startActivity(installer)
+        } catch (_: ActivityNotFoundException) {
+            launchViewInstaller(entry)
+        } catch (_: Exception) {
+            toast("安装包不可用，可能已被移动或删除")
+            pendingInstall = null
+            refreshReceived()
+        }
+    }
+
+    /** 个别 ROM 不响应 ACTION_INSTALL_PACKAGE 时，退回到系统安装器的 VIEW 入口 */
+    private fun launchViewInstaller(entry: ReceivedEntry) {
+        val view = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(entry.uri, APK_MIME)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val handlers = packageManager.queryIntentActivities(view, 0)
+            .filter { it.activityInfo.packageName != packageName }
+        val target = handlers.firstOrNull {
+            it.activityInfo.packageName.contains("packageinstaller", ignoreCase = true)
+        } ?: handlers.firstOrNull()
+        if (target == null) {
+            toast("没有可用的安装程序")
+            return
+        }
+        view.setClassName(target.activityInfo.packageName, target.activityInfo.name)
+        try {
+            startActivity(view)
+        } catch (_: Exception) {
+            toast("没有可用的安装程序")
+        }
+    }
+
+    private fun openInstallPermissionSettings() {
+        val packageUri = Uri.parse("package:$packageName")
+        try {
+            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, packageUri))
+            return
+        } catch (_: ActivityNotFoundException) {
+        }
+        try {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri))
+        } catch (_: ActivityNotFoundException) {
+            pendingInstall = null
+            toast("请手动在系统设置中允许安装未知应用")
         }
     }
 
@@ -916,18 +1018,11 @@ class MainActivity : Activity() {
         startActivity(Intent.createChooser(intent, "分享文件"))
     }
 
-    private fun confirmDelete(entry: ReceivedEntry) {
-        AlertDialog.Builder(this)
-            .setTitle("删除文件")
-            .setMessage(entry.name)
-            .setPositiveButton("删除") { _, _ ->
-                thread(name = "macdrop-delete") {
-                    store.delete(entry)
-                    runOnUiThread { refreshReceived() }
-                }
-            }
-            .setNegativeButton("取消", null)
-            .show()
+    private fun deleteEntry(entry: ReceivedEntry) {
+        thread(name = "macdrop-delete") {
+            store.delete(entry)
+            runOnUiThread { refreshReceived() }
+        }
     }
 
     // MARK: - 小工具
@@ -943,6 +1038,7 @@ class MainActivity : Activity() {
         private const val REQ_FILES = 1001
         private const val REQ_FOLDER = 1002
         private const val REQ_NOTIFICATIONS = 1003
+        private const val APK_MIME = "application/vnd.android.package-archive"
 
         private val BG = Color.parseColor("#F5F6F8")
         private val TEXT = Color.parseColor("#111827")
