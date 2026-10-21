@@ -1,5 +1,22 @@
 .DS_Store
+
+# macOS app
 .build/
 dist/
 .test-tmp/
 *.xcuserstate
+
+# iOS
+ios/DerivedData/
+ios/build/
+ios/*.xcodeproj/xcuserdata/
+ios/*.xcworkspace/xcuserdata/
+*.xcuserdata/
+
+# Android
+android/.gradle/
+android/local.properties
+android/.idea/
+android/**/build/
+*.iml
+assets/icon/AppIcon.iconset/

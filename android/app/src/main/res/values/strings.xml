@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MoonDrop</string>
+    <string name="notification_channel">文件接收</string>
+    <string name="notification_title">MoonDrop 正在接收文件</string>
+    <string name="notification_text">等待局域网内的设备发送文件</string>
+</resources>
