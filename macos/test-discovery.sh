@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 
 ROOT="$(pwd)"
 TMP="$ROOT/.test-tmp"
-BIN="$ROOT/.build/release/MacDrop"
+BIN="$ROOT/.build/release/MoonDrop"
 P1=52401
 P2=52402
 D1="$TMP/peerA-$$"
@@ -35,10 +35,10 @@ sleep 3
 
 echo
 echo "==> Peer A 日志"
-grep "MacDrop" "$TMP/peerA.log" | sed 's/^/  /'
+grep "MoonDrop" "$TMP/peerA.log" | sed 's/^/  /'
 echo
 echo "==> Peer B 日志"
-grep "MacDrop" "$TMP/peerB.log" | sed 's/^/  /'
+grep "MoonDrop" "$TMP/peerB.log" | sed 's/^/  /'
 
 echo
 echo "==> 验证 1: 互相发现"

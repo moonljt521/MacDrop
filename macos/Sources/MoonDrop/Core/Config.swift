@@ -91,15 +91,20 @@ final class Config {
 
     // MARK: - 运行时数据目录
 
-    /// App 的运行时数据根目录：~/Library/Application Support/MacDrop/
+    /// App 的运行时数据根目录：~/Library/Application Support/MoonDrop/
     ///
     /// 刻意不放项目目录，也不放 Caches：
     ///   - 不放项目目录 → 拷贝 .app 给别的 Mac 时不会带上这些
     ///   - 不放 Caches    → 系统会定期清理 Caches，传输日志容易被莫名删掉
     static var supportDir: URL {
-        let url = FileManager.default.urls(for: .applicationSupportDirectory,
-                                           in: .userDomainMask)[0]
-            .appendingPathComponent("MacDrop", isDirectory: true)
+        let base = FileManager.default.urls(for: .applicationSupportDirectory,
+                                            in: .userDomainMask)[0]
+        let url = base.appendingPathComponent("MoonDrop", isDirectory: true)
+        let legacy = base.appendingPathComponent("MacDrop", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: url.path),
+           FileManager.default.fileExists(atPath: legacy.path) {
+            try? FileManager.default.moveItem(at: legacy, to: url)
+        }
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }

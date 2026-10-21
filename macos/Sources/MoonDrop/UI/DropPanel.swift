@@ -76,7 +76,7 @@ final class DropPanel: NSObject {
                         styleMask: [.borderless, .nonactivatingPanel],
                         backing: .buffered,
                         defer: false)
-        panel.title = "MacDrop"
+        panel.title = "MoonDrop"
         // 固定深色外观：烟熏玻璃 + 白图标，在任何壁纸上都干净利落
         panel.appearance = NSAppearance(named: .darkAqua)
         panel.titlebarAppearsTransparent = true
@@ -443,13 +443,13 @@ final class DropPanel: NSObject {
     func refreshStatus() {
         statusLabel.textColor = .labelColor
         if peers.isEmpty {
-            statusLabel.stringValue = "没发现其他 Mac"
+            statusLabel.stringValue = "没发现其他设备"
             statusLabel.font = .systemFont(ofSize: 13.5)
         } else if peers.count == 1 {
             statusLabel.stringValue = "拖到这里 → \(peers[0].name)"
             statusLabel.font = .systemFont(ofSize: 13.5, weight: .medium)
         } else {
-            statusLabel.stringValue = "拖到这里（\(peers.count) 台 Mac 可选）"
+            statusLabel.stringValue = "拖到这里（\(peers.count) 台设备可选）"
             statusLabel.font = .systemFont(ofSize: 13.5, weight: .medium)
         }
         layoutSubviews()
@@ -461,7 +461,7 @@ final class DropPanel: NSObject {
         isBusy = true
         busyGeneration += 1
         guard !peers.isEmpty else {
-            finishProgress(text: "没发现其他 Mac", isError: true)
+            finishProgress(text: "没发现其他设备", isError: true)
             NSSound.beep()
             return
         }
@@ -498,7 +498,7 @@ final class DropPanel: NSObject {
         pickerCancelRow?.removeFromSuperview()
 
         statusLabel.textColor = .labelColor
-        statusLabel.stringValue = "发送到哪台 Mac？"
+        statusLabel.stringValue = "发送到哪台设备？"
         statusLabel.font = .systemFont(ofSize: 13.5, weight: .medium)
 
         for peer in peers.prefix(Self.maxPickerRows) {

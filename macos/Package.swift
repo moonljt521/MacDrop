@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "MacDrop",
+    name: "MoonDrop",
     platforms: [.macOS(.v13)],
     targets: [
         .executableTarget(
-            name: "MacDrop",
-            path: "Sources/MacDrop"
+            name: "MoonDrop",
+            path: "Sources/MoonDrop"
         )
     ]
 )

@@ -2,7 +2,7 @@ import Foundation
 import Network
 
 /// 极简 HTTP/1.1 服务端，基于 Network.framework。
-/// 只实现 MacDrop 需要的语义，避免引入第三方依赖。
+/// 只实现 MoonDrop 需要的语义，避免引入第三方依赖。
 final class HTTPService {
 
     struct Request {
@@ -51,6 +51,8 @@ final class HTTPService {
 
     private static let crlf = Data("\r\n".utf8)
     private static let headerEnd = Data("\r\n\r\n".utf8)
+    /// 单个分块 2 MB，留出余量；超过就当成异常请求拒掉
+    private static let maxBodyBytes = 32 * 1024 * 1024
 
     init(port: UInt16, handler: @escaping Handler) {
         self.port = port
@@ -67,10 +69,10 @@ final class HTTPService {
         }
         l.stateUpdateHandler = { [weak self] state in
             if case .failed(let err) = state {
-                NSLog("[MacDrop] HTTP 监听失败: \(err)")
+                NSLog("[MoonDrop] HTTP 监听失败: \(err)")
             }
             if case .ready = state, let p = self?.listener?.port {
-                NSLog("[MacDrop] HTTP 服务已启动，端口 \(p.rawValue)")
+                NSLog("[MoonDrop] HTTP 服务已启动，端口 \(p.rawValue)")
             }
         }
         listener = l
@@ -108,6 +110,11 @@ final class HTTPService {
                 request.remoteHost = "\(host)"
             }
             expectedBody = Int(request.headers["content-length"] ?? "0") ?? 0
+            // 单个分块 2 MB；异常/伪造的长度直接拒掉，避免被撑爆内存
+            guard expectedBody <= Self.maxBodyBytes else {
+                failAndClose("请求体过大")
+                return true
+            }
             state = 1
             return false
         }
@@ -160,7 +167,7 @@ final class HTTPService {
 
     static func parseHeader(_ data: Data) -> Request? {
         guard let text = String(data: data, encoding: .utf8) else { return nil }
-        var lines = text.components(separatedBy: "\r\n")
+        let lines = text.components(separatedBy: "\r\n")
         guard let requestLine = lines.first else { return nil }
         let parts = requestLine.split(separator: " ", maxSplits: 2).map(String.init)
         guard parts.count >= 2 else { return nil }

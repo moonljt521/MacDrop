@@ -1,5 +1,5 @@
 #!/bin/bash
-# 端到端传输测试：起一个 MacDrop 实例当接收端，用真实 HTTP 协议推送文件，校验落盘与内容一致性。
+# 端到端传输测试：起一个 MoonDrop 实例当接收端，用真实 HTTP 协议推送文件，校验落盘与内容一致性。
 # 所有临时文件都在项目内 .test-tmp/，不写 /tmp。
 set -e
 cd "$(dirname "$0")"
@@ -8,7 +8,7 @@ PORT=${1:-52399}
 ROOT="$(pwd)"
 TMP="$ROOT/.test-tmp"
 RECV_DIR="$TMP/e2e-$$"
-BIN="$ROOT/.build/release/MacDrop"
+BIN="$ROOT/.build/release/MoonDrop"
 RECV_PID=""
 
 mkdir -p "$RECV_DIR"
@@ -122,7 +122,7 @@ ls -1 "$RECV_DIR" | sed 's/^/    /'
 
 echo
 echo "==> 测试 5: 临时文件清理检查"
-STAGE="$HOME/Library/Application Support/MacDrop/.staging"
+STAGE="$HOME/Library/Application Support/MoonDrop/.staging"
 LEFT=$(ls -1 "$STAGE" 2>/dev/null | wc -l | tr -d ' ')
 if [ "$LEFT" -eq 0 ]; then
     echo "  ✓ 无残留临时文件（$STAGE）"
@@ -132,7 +132,7 @@ fi
 
 echo
 echo "==> 接收端日志"
-grep "MacDrop" "$TMP/e2e.log" | tail -8 | sed 's/^/  /'
+grep "MoonDrop" "$TMP/e2e.log" | tail -8 | sed 's/^/  /'
 
 echo
 echo "==> 测试完成，接收目录保留在 $RECV_DIR 供检查（都在项目 .test-tmp/ 里，可整体删掉）"

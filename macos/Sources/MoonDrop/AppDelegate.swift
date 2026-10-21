@@ -7,7 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var status: StatusItemController!
     private let engine = TransferEngine.shared
 
-    private var pendingMeta: [String: (name: String, root: String, total: Int64)] = [:]
+    private var pendingMeta: [String: (name: String, path: String, root: String, total: Int64)] = [:]
     /// 接收进度节流：只有整数百分比变化才刷新 UI
     private var lastRecvPercent = -1
 
@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try? cfg.ensureDownloadDir()
         takeOverRunningInstances()
         cleanupStaleStaging()
-        Logger.write("MacDrop 启动，设备名=\(cfg.deviceName)，端口=\(cfg.port)，接收目录=\(cfg.downloadDir)")
+        Logger.write("MoonDrop 启动，设备名=\(cfg.deviceName)，端口=\(cfg.port)，接收目录=\(cfg.downloadDir)")
 
         startServer()
 
@@ -212,7 +212,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             do {
                 try engine.beginReceive(transferID: id, fileName: name, total: size)
-                pendingMeta[id] = (name, req.query["root"] ?? "", size)
+                pendingMeta[id] = (name, req.query["path"] ?? "",
+                                   req.query["root"] ?? "", size)
                 lastRecvPercent = -1
                 Logger.write("开始接收 \(name)（\(size) 字节）")
                 DispatchQueue.main.async { [weak self] in
@@ -251,6 +252,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 let dest = try engine.finishReceive(transferID: id,
                                                     fileName: meta?.name ?? id,
+                                                    relativePath: meta?.path,
                                                     rootName: meta?.root,
                                                     expectedSize: meta?.total)
                 Logger.write("接收完成 → \(dest.path)")
@@ -334,7 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .cannotConnectToHost, .cannotFindHost, .timedOut,
              .networkConnectionLost, .notConnectedToInternet, .dnsLookupFailed:
             return "\n  提示：对端可能未运行或在睡眠；确认两台在同一 Wi-Fi；"
-                 + "系统设置→隐私与安全性→本地网络 中允许 MacDrop"
+                 + "系统设置→隐私与安全性→本地网络 中允许 MoonDrop"
         default:
             return ""
         }

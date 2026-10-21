@@ -57,7 +57,7 @@ final class TransferEngine {
         lock.lock()
         let url = staging[transferID]
         lock.unlock()
-        guard let url else { throw NSError(domain: "MacDrop", code: 404,
+        guard let url else { throw NSError(domain: "MoonDrop", code: 404,
                                             userInfo: [NSLocalizedDescriptionKey: "未知传输 ID"]) }
         let fh = try FileHandle(forWritingTo: url)
         defer { try? fh.close() }
@@ -68,13 +68,13 @@ final class TransferEngine {
     /// 完成并原子移动到目标目录。返回最终路径。
     /// expectedSize 不为空时先校验落盘字节数，不完整就报错并删掉半截文件。
     @discardableResult
-    func finishReceive(transferID: String, fileName: String, rootName: String?,
-                       expectedSize: Int64? = nil) throws -> URL {
+    func finishReceive(transferID: String, fileName: String, relativePath: String?,
+                       rootName: String?, expectedSize: Int64? = nil) throws -> URL {
         lock.lock()
         let tmp = staging.removeValue(forKey: transferID)
         lock.unlock()
         guard let tmp else {
-            throw NSError(domain: "MacDrop", code: 404,
+            throw NSError(domain: "MoonDrop", code: 404,
                           userInfo: [NSLocalizedDescriptionKey: "未知传输 ID"])
         }
 
@@ -83,7 +83,7 @@ final class TransferEngine {
             let got = (attrs?[.size] as? NSNumber)?.int64Value ?? -1
             guard got == expectedSize else {
                 try? fm.removeItem(at: tmp)
-                throw NSError(domain: "MacDrop", code: 500, userInfo: [
+                throw NSError(domain: "MoonDrop", code: 500, userInfo: [
                     NSLocalizedDescriptionKey: "文件不完整：已收 \(got) / \(expectedSize) 字节"
                 ])
             }
@@ -92,12 +92,12 @@ final class TransferEngine {
         let base = Config.shared.downloadURL
         try fm.createDirectory(at: base, withIntermediateDirectories: true)
 
-        // 若是文件夹拖放，落盘到 <base>/<文件夹名>/
+        // 目录拖放：按相对路径还原目录结构；老发送端只带 root 时退回顶层目录
         var targetDir = base
-        if let root = rootName, !root.isEmpty {
-            targetDir = base.appendingPathComponent(sanitize(root), isDirectory: true)
-            try fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
+        for component in relativeDirectories(path: relativePath, root: rootName) {
+            targetDir.appendPathComponent(component, isDirectory: true)
         }
+        try fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
 
         let dest = uniqueURL(in: targetDir, name: sanitize(fileName))
         try fm.moveItem(at: tmp, to: dest)
@@ -124,6 +124,13 @@ final class TransferEngine {
         state.totalBytes = items.reduce(0) { $0 + $1.size }
         progress(state)
 
+        // 进度要跨文件累计：state 是被闭包捕获的变量，report 里改的是同一份。
+        let report: (Int64, String) -> Void = { sent, current in
+            state.sentBytes += sent
+            state.currentFile = current
+            DispatchQueue.main.async { progress(state) }
+        }
+
         // 目录拖放：把最外层目录名告诉接收端，让它保持目录结构
         let rootName = items.count == 1 && items[0].relativePath.contains("/")
             ? String(items[0].relativePath.split(separator: "/").first ?? "")
@@ -139,7 +146,7 @@ final class TransferEngine {
             progress(state)
 
             sendFile(item, idx: idx, baseURL: base, rootName: rootName,
-                     state: state, progress: progress, next: next,
+                     report: report, progress: progress, next: next,
                      completion: completion)
         }
         next(0)
@@ -149,7 +156,7 @@ final class TransferEngine {
                           idx: Int,
                           baseURL: String,
                           rootName: String?,
-                          state: TransferProgress,
+                          report: @escaping (Int64, String) -> Void,
                           progress: @escaping (TransferProgress) -> Void,
                           next: @escaping (Int) -> Void,
                           completion: @escaping (Result<Void, Error>) -> Void) {
@@ -164,17 +171,16 @@ final class TransferEngine {
             switch result {
             case .failure(let err):
                 // 关键：必须把失败上报，否则界面永远停在「传输中 0%」
-                NSLog("[MacDrop] 发送失败 \(item.url.lastPathComponent): \(err)")
+                NSLog("[MoonDrop] 发送失败 \(item.url.lastPathComponent): \(err)")
                 completion(.failure(err))
             case .success:
                 self.uploadChunks(item: item, transferID: transferID,
-                                  baseURL: baseURL, state: state,
-                                  progress: progress) { upResult in
+                                  baseURL: baseURL, report: report) { upResult in
                     switch upResult {
                     case .success:
                         next(idx + 1)
                     case .failure(let err):
-                        NSLog("[MacDrop] 上传中断: \(err)")
+                        NSLog("[MoonDrop] 上传中断: \(err)")
                         self.abort(transferID: transferID, baseURL: baseURL) { _ in }
                         completion(.failure(err))
                     }
@@ -209,18 +215,16 @@ final class TransferEngine {
     }
 
     private func uploadChunks(item: FileItem, transferID: String, baseURL: String,
-                              state: TransferProgress,
-                              progress: @escaping (TransferProgress) -> Void,
+                              report: @escaping (Int64, String) -> Void,
                               completion: @escaping (Result<Void, Error>) -> Void) {
 
         guard let fh = try? FileHandle(forReadingFrom: item.url) else {
-            completion(.failure(NSError(domain: "MacDrop", code: 500,
+            completion(.failure(NSError(domain: "MoonDrop", code: 500,
                                         userInfo: [NSLocalizedDescriptionKey: "无法读取文件"])))
             return
         }
 
         var offset: Int64 = 0
-        var localState = state
 
         // 本方法是同步的：分块是异步逐个发出的，句柄必须活到最后一个分块发完。
         // 不能在函数返回时关闭（defer），否则第二块开始读取就会失败。
@@ -244,7 +248,7 @@ final class TransferEngine {
             let want = Int64(chunkSize)
             guard let data = try? fh.read(upToCount: Int(want)), !data.isEmpty else {
                 // 读到一半提前结束说明源文件变了，绝不能当成功收尾（否则对端留下截断文件）
-                failAndClose(NSError(domain: "MacDrop", code: 500, userInfo: [
+                failAndClose(NSError(domain: "MoonDrop", code: 500, userInfo: [
                     NSLocalizedDescriptionKey: "读取提前结束（\(offset)/\(item.size) 字节）"
                 ]))
                 return
@@ -262,8 +266,7 @@ final class TransferEngine {
                 guard let code = (resp as? HTTPURLResponse)?.statusCode, (200..<300).contains(code) else {
                     return failAndClose(URLError(.badServerResponse))
                 }
-                localState.sentBytes += Int64(data.count)
-                DispatchQueue.main.async { progress(localState) }
+                report(Int64(data.count), item.url.lastPathComponent)
                 sendNext()
             }.resume()
         }
@@ -295,14 +298,17 @@ final class TransferEngine {
     /// 把拖进来的 URL 展开成文件列表，目录递归
     func expand(urls: [URL]) -> [FileItem] {
         var out: [FileItem] = []
-        let base = urls.count == 1 ? urls[0].deletingLastPathComponent().standardizedFileURL : nil
 
         func walk(_ url: URL, prefix: String) {
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: url.path, isDirectory: &isDir) else { return }
+            let name = url.lastPathComponent
+            // 隐藏文件（.DS_Store 等）不参与传输，和移动端保持一致
+            guard !name.hasPrefix(".") else { return }
             if isDir.boolValue {
                 guard let kids = try? fm.contentsOfDirectory(at: url,
-                                                            includingPropertiesForKeys: [.isDirectoryKey]) else { return }
+                                                            includingPropertiesForKeys: [.isDirectoryKey],
+                                                            options: [.skipsHiddenFiles]) else { return }
                 for kid in kids.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
                     walk(kid, prefix: prefix.isEmpty ? kid.lastPathComponent
                                                      : "\(prefix)/\(kid.lastPathComponent)")
@@ -315,12 +321,7 @@ final class TransferEngine {
         }
 
         for u in urls {
-            let name = u.lastPathComponent
-            if let base, base.standardizedFileURL == u.standardizedFileURL {
-                walk(u, prefix: name)
-            } else {
-                walk(u, prefix: name)
-            }
+            walk(u, prefix: u.lastPathComponent)
         }
         return out
     }
@@ -333,6 +334,18 @@ final class TransferEngine {
         name.replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: ":", with: "_")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// 把 path 的目录部分拆成安全的目录名；path 只有文件名时用 root 兜底。
+    private func relativeDirectories(path: String?, root: String?) -> [String] {
+        let directories = ((path ?? "") as NSString).deletingLastPathComponent
+        var components = directories.split(separator: "/")
+            .map { sanitize(String($0)) }
+            .filter { !$0.isEmpty && $0 != "." && $0 != ".." }
+        if components.isEmpty, let root, !root.isEmpty {
+            components = [sanitize(root)]
+        }
+        return components
     }
 
     /// 同名避让：foo.txt -> foo (1).txt

@@ -23,6 +23,8 @@ final class BonjourService: NSObject {
     private var advertiser: NetService?
     private var browser: NetServiceBrowser?
     private var resolving: Set<NetService> = []
+    private var servicePeers: [String: String] = [:]   // service name -> peer id
+    private var pendingRemovals: [String: DispatchWorkItem] = [:]
     /// 自己广告出去的名字，用来过滤「自己发现自己」
     private var ownName: String = ""
     /// 自己广播用的端口，和主机名一起用于唯一识别本机
@@ -47,7 +49,7 @@ final class BonjourService: NSObject {
         svc.setTXTRecord(Data())
         svc.publish()
         advertiser = svc
-        NSLog("[MacDrop] Bonjour 广告启动: \(name)")
+        NSLog("[MoonDrop] Bonjour 广告启动: \(name)")
     }
 
     func stopAdvertising() {
@@ -64,7 +66,7 @@ final class BonjourService: NSObject {
         b.searchForServices(ofType: BonjourService.serviceType,
                             inDomain: BonjourService.domain)
         browser = b
-        NSLog("[MacDrop] Bonjour 浏览启动")
+        NSLog("[MoonDrop] Bonjour 浏览启动")
     }
 
     func stopBrowsing() {
@@ -74,9 +76,13 @@ final class BonjourService: NSObject {
 
     // MARK: - 对端表
 
-    private func upsert(_ peer: Peer) {
+    private func upsert(_ peer: Peer, serviceName: String? = nil) {
         lock.lock()
-        if let idx = peers.firstIndex(where: { $0.id == peer.id }) {
+        if let serviceName {
+            servicePeers[serviceName] = peer.id
+        }
+        // 按地址去重：设备改名后 Bonjour 名字会变，按 id 会出现两条同一台设备
+        if let idx = peers.firstIndex(where: { $0.host == peer.host && $0.port == peer.port }) {
             peers[idx] = peer
         } else {
             peers.append(peer)
@@ -86,11 +92,36 @@ final class BonjourService: NSObject {
         notify()
     }
 
-    private func removeAllDiscovered() {
+    /// 只移除消失的那一台设备；不能因为一次 lost 事件清空整个列表。
+    private func remove(serviceName: String) {
         lock.lock()
-        peers.removeAll { !$0.isManual }
+        pendingRemovals.removeValue(forKey: serviceName)
+        if let peerID = servicePeers.removeValue(forKey: serviceName) {
+            peers.removeAll { $0.id == peerID }
+        } else {
+            peers.removeAll { !$0.isManual && $0.name == serviceName }
+        }
         lock.unlock()
         notify()
+    }
+
+    /// mDNS 会偶发 lost，延迟几秒再移除；期间若重新发现就取消。
+    private func scheduleRemoval(serviceName: String) {
+        let work = DispatchWorkItem { [weak self] in
+            self?.remove(serviceName: serviceName)
+        }
+        lock.lock()
+        pendingRemovals.removeValue(forKey: serviceName)?.cancel()
+        pendingRemovals[serviceName] = work
+        lock.unlock()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: work)
+    }
+
+    private func cancelPendingRemoval(serviceName: String) {
+        lock.lock()
+        let work = pendingRemovals.removeValue(forKey: serviceName)
+        lock.unlock()
+        work?.cancel()
     }
 
     private func notify() {
@@ -138,7 +169,8 @@ extension BonjourService: NetServiceBrowserDelegate {
            serviceHost.contains(localHost.lowercased()) {
             return
         }
-        NSLog("[MacDrop] 发现对端: \(service.name)")
+        cancelPendingRemoval(serviceName: service.name)
+        NSLog("[MoonDrop] 发现对端: \(service.name)")
         service.delegate = self
         resolving.insert(service)
         service.resolve(withTimeout: 5)
@@ -147,32 +179,34 @@ extension BonjourService: NetServiceBrowserDelegate {
     func netServiceBrowser(_ browser: NetServiceBrowser,
                            didRemove service: NetService,
                            moreComing: Bool) {
-        NSLog("[MacDrop] 对端消失: \(service.name)")
+        NSLog("[MoonDrop] 对端消失: \(service.name)")
         resolving.remove(service)
-        removeAllDiscovered()
+        scheduleRemoval(serviceName: service.name)
     }
 
     func netServiceBrowser(_ browser: NetServiceBrowser,
                            didNotSearch errorDict: [String: NSNumber]) {
-        NSLog("[MacDrop] Bonjour 浏览失败: \(errorDict)")
+        NSLog("[MoonDrop] Bonjour 浏览失败: \(errorDict)")
     }
 }
 
 extension BonjourService: NetServiceDelegate {
     func netServiceDidResolveAddress(_ sender: NetService) {
         resolving.remove(sender)
+        cancelPendingRemoval(serviceName: sender.name)
         guard let host = BonjourService.pickHost(from: sender.addresses ?? []) else {
-            NSLog("[MacDrop] 解析地址失败: \(sender.name)")
+            NSLog("[MoonDrop] 解析地址失败: \(sender.name)")
             return
         }
         upsert(Peer(host: host,
                     port: UInt16(sender.port),
-                    name: sender.name))
+                    name: sender.name),
+               serviceName: sender.name)
     }
 
     func netService(_ sender: NetService,
                     didNotResolve errorDict: [String: NSNumber]) {
-        NSLog("[MacDrop] 解析超时: \(sender.name)")
+        NSLog("[MoonDrop] 解析超时: \(sender.name)")
         resolving.remove(sender)
     }
 

@@ -25,9 +25,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     func build() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "arrow.down.doc.fill", accessibilityDescription: "MacDrop")
+            button.image = NSImage(systemSymbolName: "arrow.down.doc.fill", accessibilityDescription: "MoonDrop")
             button.image?.isTemplate = true
-            button.toolTip = "MacDrop — 跨 Mac 拖放文件"
+            button.toolTip = "MoonDrop — 跨 Mac 拖放文件"
         }
 
         menu = NSMenu()
@@ -75,13 +75,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func rebuildMenu() {
         menu.removeAllItems()
 
-        let head = NSMenuItem(title: "MacDrop · \(cfg.deviceName)", action: nil, keyEquivalent: "")
+        let head = NSMenuItem(title: "MoonDrop · \(cfg.deviceName)", action: nil, keyEquivalent: "")
         head.isEnabled = false
         menu.addItem(head)
         menu.addItem(.separator())
 
         if peers.isEmpty {
-            let none = NSMenuItem(title: "  未发现其他 Mac", action: nil, keyEquivalent: "")
+            let none = NSMenuItem(title: "  未发现其他设备", action: nil, keyEquivalent: "")
             none.isEnabled = false
             menu.addItem(none)
             menu.addItem(.separator())
@@ -89,7 +89,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             manual.target = self
             menu.addItem(manual)
         } else {
-            let title = NSMenuItem(title: "对端 Mac：", action: nil, keyEquivalent: "")
+            let title = NSMenuItem(title: "对端设备：", action: nil, keyEquivalent: "")
             title.isEnabled = false
             menu.addItem(title)
             for peer in peers {
@@ -140,7 +140,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         logs.target = self
         menu.addItem(logs)
 
-        let quit = NSMenuItem(title: "退出 MacDrop",
+        let quit = NSMenuItem(title: "退出 MoonDrop",
                               action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
@@ -153,7 +153,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
               let peer = peers.first(where: { $0.id == id }) else { return }
         let urls = FinderBridge.selectedURLs()
         guard !urls.isEmpty else {
-            NSAlert(error: NSError(domain: "MacDrop", code: 1, userInfo: [
+            NSAlert(error: NSError(domain: "MoonDrop", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "Finder 里没有选中任何文件"
             ])).runModal()
             return
@@ -193,7 +193,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func manualAdd() {
         let alert = NSAlert()
         alert.messageText = "手动添加对端"
-        alert.informativeText = "在对方 Mac 上打开 MacDrop → 关于/菜单栏 → 查看 IP，或用 ifconfig 获取。\n格式如 192.168.1.23"
+        alert.informativeText = "在对方设备上打开 MoonDrop → 关于/菜单栏 → 查看 IP，或用 ifconfig 获取。\n格式如 192.168.1.23"
         let field = NSTextField(string: "")
         field.placeholderString = "192.168.1.23"
         alert.accessoryView = field
@@ -207,8 +207,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let port = cfg.port
         bonjour.probeManual(host: host, port: port, name: "手动对端") { ok in
             if !ok {
-                NSAlert(error: NSError(domain: "MacDrop", code: 2, userInfo: [
-                    NSLocalizedDescriptionKey: "连不上 \(host):\(port)，确认对方 MacDrop 在运行、防火墙已放行"
+                NSAlert(error: NSError(domain: "MoonDrop", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey: "连不上 \(host):\(port)，确认对方 MoonDrop 在运行、防火墙已放行"
                 ])).runModal()
             }
         }
@@ -268,6 +268,6 @@ enum Logger {
         } else {
             try? Data(line.utf8).write(to: logFile)
         }
-        NSLog("[MacDrop] %@", s)
+        NSLog("[MoonDrop] %@", s)
     }
 }
