@@ -6,6 +6,8 @@ struct Peer: Identifiable, Hashable {
     var host: String
     var port: UInt16
     var isManual: Bool = false
+    /// 同一台设备的其它可用地址：首选地址连不通时依次尝试
+    var alternatives: [String] = []
 }
 
 struct OutgoingFile {

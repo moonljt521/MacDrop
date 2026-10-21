@@ -33,7 +33,7 @@ Sender                                  Receiver
 ```
 
 - **Discovery** — Bonjour `_macdrop._tcp`; a peer leaves the list only when it really goes away.
-- **Transfer** — HTTP/1.1, sequential 2 MiB chunks, each acknowledged before the next one starts.
+- **Transfer** — HTTP/1.1 with keep-alive; 2 MiB chunks travel over up to 3 parallel connections, each acknowledged before the next one starts.
 - **Integrity** — the receiver compares the written byte count with the announced size and rejects mismatches.
 - **Delivery** — macOS and iOS move a verified file into place; Android publishes a pending `MediaStore` entry.
 

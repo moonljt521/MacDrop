@@ -91,41 +91,61 @@ final class HTTPService {
         var buffer = Data()
         var request = Request()
         var expectedBody = 0
-        var state = 0 // 0=读头 1=读体
+        var state = 0 // 0=读头 1=读体 2=已应答
+        var closing = false
+        var stopped = false
 
-        func failAndClose(_ msg: String) {
-            send(conn, .failure(msg)) { conn.cancel() }
+        // keep-alive：应答后不关闭连接，继续处理同一连接上的下一个请求。
+        // 之前每块都新建连接，握手 + 慢启动把吞吐压得很低。
+        func respond(_ response: Response) {
+            send(conn, response, keepAlive: !closing) {
+                if closing {
+                    conn.cancel()
+                    return
+                }
+                buffer.removeAll(keepingCapacity: true)
+                request = Request()
+                expectedBody = 0
+                state = 0
+                receiveNext()
+            }
         }
 
-        func processBuffer() -> Bool {
-            guard state == 0 else { return false }
-            guard let range = buffer.range(of: HTTPService.headerEnd) else { return false }
+        func failAndClose(_ msg: String) {
+            closing = true
+            stopped = true
+            send(conn, .failure(msg), keepAlive: false) { conn.cancel() }
+        }
+
+        func processBuffer() {
+            guard state == 0 else { return }
+            guard let range = buffer.range(of: HTTPService.headerEnd) else { return }
             let headerData = buffer.subdata(in: buffer.startIndex..<range.lowerBound)
             buffer.removeSubrange(buffer.startIndex..<range.upperBound)
             guard let parsed = HTTPService.parseHeader(headerData) else {
-                failAndClose("malformed header"); return true
+                failAndClose("malformed header")
+                return
             }
             request = parsed
             if case let .hostPort(host, _) = conn.endpoint {
                 request.remoteHost = "\(host)"
             }
+            if request.headers["connection"]?.lowercased() == "close" { closing = true }
             expectedBody = Int(request.headers["content-length"] ?? "0") ?? 0
             // 单个分块 2 MB；异常/伪造的长度直接拒掉，避免被撑爆内存
             guard expectedBody <= Self.maxBodyBytes else {
                 failAndClose("请求体过大")
-                return true
+                return
             }
             state = 1
-            return false
         }
 
-        func readBodyIfComplete() -> Bool {
-            guard state == 1 else { return false }
-            guard buffer.count >= expectedBody else { return false }
-            request.body = buffer.prefix(expectedBody)
+        func readBodyIfComplete() {
+            guard state == 1, buffer.count >= expectedBody else { return }
+            request.body = Data(buffer.prefix(expectedBody))
+            buffer.removeSubrange(buffer.startIndex..<(buffer.startIndex + expectedBody))
             state = 2
-            send(conn, handler(request)) { conn.cancel() }
-            return true
+            respond(handler(request))
         }
 
         func receiveNext() {
@@ -133,26 +153,36 @@ final class HTTPService {
                 data, _, isComplete, error in
                 if let data, !data.isEmpty {
                     buffer.append(data)
-                    if !processBuffer(), !readBodyIfComplete() {
-                        receiveNext()
-                        return
+                    if state == 0 {
+                        processBuffer()
+                        if stopped { return }
+                        if state == 0 {   // 头还没收全
+                            receiveNext()
+                            return
+                        }
                     }
+                    if state == 1 {
+                        readBodyIfComplete()
+                        if state == 2 { return }   // 等应答写完再继续
+                    }
+                    receiveNext()
                 } else if isComplete || error != nil {
                     conn.cancel()
-                    return
+                } else {
+                    receiveNext()
                 }
-                receiveNext()
             }
         }
 
         receiveNext()
     }
 
-    private func send(_ conn: NWConnection, _ resp: Response, completion: @escaping () -> Void) {
+    private func send(_ conn: NWConnection, _ resp: Response,
+                      keepAlive: Bool = true, completion: @escaping () -> Void) {
         var head = "HTTP/1.1 \(resp.status) \(HTTPService.reason(resp.status))\r\n"
         var headers = resp.headers
         headers["Content-Length"] = String(resp.body.count)
-        headers["Connection"] = "close"
+        headers["Connection"] = keepAlive ? "keep-alive" : "close"
         for (k, v) in headers {
             head += "\(k): \(v)\r\n"
         }

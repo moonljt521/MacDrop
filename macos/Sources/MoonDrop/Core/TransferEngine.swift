@@ -113,85 +113,282 @@ final class TransferEngine {
 
     // MARK: - 发送端
 
-    /// 把一批文件推送到对端。逐个文件 → 逐个分块。
+    /// 把一批文件推送到对端：先为每个文件建会话，再分块并发发送。
+    /// 分块自带偏移，接收端按偏移随机写，所以同一文件的块可以乱序到达。
     func send(items: [FileItem],
               to peer: Peer,
               progress: @escaping (TransferProgress) -> Void,
               completion: @escaping (Result<Void, Error>) -> Void) {
 
-        let base = "http://\(peer.host):\(peer.port)"
-        var state = TransferProgress()
-        state.totalBytes = items.reduce(0) { $0 + $1.size }
-        progress(state)
+        // 首选地址（局域网 IP）连不通时，依次尝试同一台设备的其它地址
+        let bases = ([peer.host] + peer.alternatives).map { "http://\($0):\(peer.port)" }
+        let total = items.reduce(Int64(0)) { $0 + $1.size }
+        let tracker = SendProgressTracker()
 
-        // 进度要跨文件累计：state 是被闭包捕获的变量，report 里改的是同一份。
-        let report: (Int64, String) -> Void = { sent, current in
-            state.sentBytes += sent
-            state.currentFile = current
-            DispatchQueue.main.async { progress(state) }
+        var initial = TransferProgress()
+        initial.totalBytes = total
+        progress(initial)
+
+        func report(bytes: Int64, file: String) {
+            tracker.add(bytes, file: file)
+            DispatchQueue.main.async {
+                // 读当前累计值而不是回调里的快照：
+                // 并发时两个分块的回调可能乱序进主队列，用旧快照会让进度条回退
+                let snapshot = tracker.snapshot()
+                var state = TransferProgress()
+                state.totalBytes = total
+                state.sentBytes = snapshot.sent
+                state.currentFile = snapshot.current
+                progress(state)
+            }
         }
 
-        // 目录拖放：把最外层目录名告诉接收端，让它保持目录结构
-        let rootName = items.count == 1 && items[0].relativePath.contains("/")
-            ? String(items[0].relativePath.split(separator: "/").first ?? "")
-            : nil
+        var sessions: [SendSession] = []
 
-        func next(_ idx: Int) {
-            guard idx < items.count else {
-                completion(.success(()))
+        func announceNext(_ index: Int) {
+            guard index < items.count else {
+                runParallelSend(sessions: sessions, report: report, completion: completion)
                 return
             }
-            let item = items[idx]
-            state.currentFile = item.url.lastPathComponent
-            progress(state)
+            let item = items[index]
+            let transferID = UUID().uuidString
+            // 目录拖放：把最外层目录名告诉接收端，让它保持目录结构
+            let rootName = item.relativePath.contains("/")
+                ? String(item.relativePath.split(separator: "/").first ?? "")
+                : nil
 
-            sendFile(item, idx: idx, baseURL: base, rootName: rootName,
-                     report: report, progress: progress, next: next,
-                     completion: completion)
+            announce(bases: bases, transferID: transferID, fileName: item.url.lastPathComponent,
+                     relPath: item.relativePath, total: item.size, rootName: rootName) { result in
+                switch result {
+                case .failure(let error):
+                    NSLog("[MoonDrop] 发送失败 \(item.url.lastPathComponent): \(error)")
+                    for session in sessions { TransferEngine.abort(transferID: session.transferID, baseURL: session.base) }
+                    completion(.failure(error))
+                case .success(let base):
+                    sessions.append(SendSession(item: item, transferID: transferID, base: base))
+                    announceNext(index + 1)
+                }
+            }
         }
-        next(0)
+        announceNext(0)
     }
 
-    private func sendFile(_ item: FileItem,
-                          idx: Int,
-                          baseURL: String,
-                          rootName: String?,
-                          report: @escaping (Int64, String) -> Void,
-                          progress: @escaping (TransferProgress) -> Void,
-                          next: @escaping (Int) -> Void,
-                          completion: @escaping (Result<Void, Error>) -> Void) {
+    /// 并发发送所有分块；某个文件的最后一块发完后再给它发 finish。
+    private func runParallelSend(sessions: [SendSession],
+                                 report: @escaping (Int64, String) -> Void,
+                                 completion: @escaping (Result<Void, Error>) -> Void) {
+        guard !sessions.isEmpty else {
+            completion(.success(()))
+            return
+        }
 
-        let transferID = UUID().uuidString
-        let rel = item.relativePath
+        var works: [ChunkWork] = []
+        var perFile: [Int] = []
+        for (index, session) in sessions.enumerated() {
+            let count = Int((session.item.size + Int64(chunkSize) - 1) / Int64(chunkSize))
+            perFile.append(count)
+            var offset: Int64 = 0
+            for _ in 0..<count {
+                works.append(ChunkWork(sessionIndex: index, offset: offset))
+                offset += Int64(chunkSize)
+            }
+        }
 
-        // 1) announce
-        announce(transferID: transferID, fileName: item.url.lastPathComponent,
-                 relPath: rel, total: item.size, rootName: rootName,
-                 baseURL: baseURL) { result in
-            switch result {
-            case .failure(let err):
-                // 关键：必须把失败上报，否则界面永远停在「传输中 0%」
-                NSLog("[MoonDrop] 发送失败 \(item.url.lastPathComponent): \(err)")
-                completion(.failure(err))
-            case .success:
-                self.uploadChunks(item: item, transferID: transferID,
-                                  baseURL: baseURL, report: report) { upResult in
-                    switch upResult {
-                    case .success:
-                        next(idx + 1)
-                    case .failure(let err):
-                        NSLog("[MoonDrop] 上传中断: \(err)")
-                        self.abort(transferID: transferID, baseURL: baseURL) { _ in }
-                        completion(.failure(err))
+        // 空文件没有分块，直接收尾
+        for (index, session) in sessions.enumerated() where perFile[index] == 0 {
+            do {
+                try TransferEngine.postFinish(baseURL: session.base, transferID: session.transferID)
+            } catch {
+                completion(.failure(error))
+                return
+            }
+        }
+
+        let queue = ChunkQueue(works)
+        let remaining = RemainingCounter(perFile)
+        let failure = FailureBox()
+        let group = DispatchGroup()
+        let workers = DispatchQueue(label: "com.macdrop.send.workers", attributes: .concurrent)
+        let workerCount = min(Config.parallelChunks, max(1, works.count))
+
+        for _ in 0..<workerCount {
+            workers.async(group: group) {
+                while true {
+                    if failure.hasValue { return }
+                    guard let work = queue.next() else { return }
+                    let session = sessions[work.sessionIndex]
+                    do {
+                        let data = try TransferEngine.readChunk(at: session.item.url,
+                                                             offset: work.offset,
+                                                             length: Int64(self.chunkSize))
+                        try TransferEngine.postChunk(baseURL: session.base, transferID: session.transferID,
+                                                    offset: work.offset, data: data)
+                        report(Int64(data.count), session.item.url.lastPathComponent)
+                        if remaining.finishOne(work.sessionIndex) {
+                            try TransferEngine.postFinish(baseURL: session.base, transferID: session.transferID)
+                        }
+                    } catch {
+                        failure.set(error)
+                        return
                     }
                 }
             }
         }
+
+        group.notify(queue: .main) {
+            if let error = failure.value {
+                NSLog("[MoonDrop] 上传中断: \(error)")
+                for session in sessions { TransferEngine.abort(transferID: session.transferID, baseURL: session.base) }
+                completion(.failure(error))
+            } else {
+                completion(.success(()))
+            }
+        }
     }
 
-    private func announce(transferID: String, fileName: String, relPath: String,
-                          total: Int64, rootName: String?, baseURL: String,
-                          completion: @escaping (Result<Void, Error>) -> Void) {
+    private struct SendSession {
+        let item: FileItem
+        let transferID: String
+        /// 实际连通的地址（首选地址失败时可能是备选地址）
+        let base: String
+    }
+
+    private struct ChunkWork {
+        let sessionIndex: Int
+        let offset: Int64
+    }
+
+    /// 线程安全的累计进度
+    private final class SendProgressTracker {
+        private let lock = NSLock()
+        private var sent: Int64 = 0
+        private var current: String = ""
+
+        func add(_ bytes: Int64, file: String) {
+            lock.lock()
+            defer { lock.unlock() }
+            sent += bytes
+            current = file
+        }
+
+        /// 当前累计值（单调递增）
+        func snapshot() -> (sent: Int64, current: String) {
+            lock.lock()
+            defer { lock.unlock() }
+            return (sent, current)
+        }
+    }
+
+    private final class ChunkQueue {
+        private let lock = NSLock()
+        private let works: [ChunkWork]
+        private var index = 0
+
+        init(_ works: [ChunkWork]) { self.works = works }
+
+        func next() -> ChunkWork? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard index < works.count else { return nil }
+            let work = works[index]
+            index += 1
+            return work
+        }
+    }
+
+    /// 每个文件还剩多少块没发完
+    private final class RemainingCounter {
+        private let lock = NSLock()
+        private var counts: [Int]
+
+        init(_ counts: [Int]) { self.counts = counts }
+
+        /// 返回 true 表示该文件的块已全部发完
+        func finishOne(_ index: Int) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard index < counts.count, counts[index] > 0 else { return false }
+            counts[index] -= 1
+            return counts[index] == 0
+        }
+    }
+
+    /// 线程安全的错误容器
+    private final class ErrorBox {
+        private let lock = NSLock()
+        private var error: Error?
+
+        func set(_ error: Error) {
+            lock.lock()
+            self.error = error
+            lock.unlock()
+        }
+
+        var value: Error? {
+            lock.lock()
+            defer { lock.unlock() }
+            return error
+        }
+    }
+
+    private final class FailureBox {
+        private let lock = NSLock()
+        private var error: Error?
+
+        var hasValue: Bool {
+            lock.lock(); defer { lock.unlock() }
+            return error != nil
+        }
+
+        var value: Error? {
+            lock.lock(); defer { lock.unlock() }
+            return error
+        }
+
+        func set(_ error: Error) {
+            lock.lock()
+            self.error = error
+            lock.unlock()
+        }
+    }
+
+    /// 依次尝试各地址；全部失败再整体重试一轮
+    /// （对端刚被唤醒时，第一次连接常被直接丢弃）
+    private func announce(bases: [String], transferID: String, fileName: String, relPath: String,
+                          total: Int64, rootName: String?,
+                          completion: @escaping (Result<String, Error>) -> Void) {
+        let lastError = ErrorBox()
+
+        func attempt(_ index: Int, round: Int) {
+            guard index < bases.count else {
+                if round == 0 {
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 0.4) { attempt(0, round: 1) }
+                } else {
+                    let reason = (lastError.value ?? URLError(.badURL)).localizedDescription
+                    completion(.failure(NSError(domain: "MoonDrop", code: 1, userInfo: [
+                        NSLocalizedDescriptionKey: "\(reason)（对方可能在后台或已离线，请在对方屏幕上打开 MoonDrop）"
+                    ])))
+                }
+                return
+            }
+            let base = bases[index]
+            announceOnce(transferID: transferID, fileName: fileName,
+                         relPath: relPath, total: total, rootName: rootName, baseURL: base) { result in
+                switch result {
+                case .success:
+                    completion(.success(base))
+                case .failure(let error):
+                    lastError.set(error)
+                    attempt(index + 1, round: round)
+                }
+            }
+        }
+        attempt(0, round: 0)
+    }
+
+    private func announceOnce(transferID: String, fileName: String, relPath: String,
+                              total: Int64, rootName: String?, baseURL: String,
+                              completion: @escaping (Result<Void, Error>) -> Void) {
         var comps = URLComponents()
         comps.queryItems = [
             .init(name: "name", value: fileName),
@@ -204,7 +401,8 @@ final class TransferEngine {
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        req.timeoutInterval = 15
+        // 对端 App 挂起时不会回包，短超时才能快速失败并换地址/重试
+        req.timeoutInterval = 4
         URLSession.shared.dataTask(with: req) { _, resp, err in
             if let err { return completion(.failure(err)) }
             guard let code = (resp as? HTTPURLResponse)?.statusCode, (200..<300).contains(code) else {
@@ -214,83 +412,75 @@ final class TransferEngine {
         }.resume()
     }
 
-    private func uploadChunks(item: FileItem, transferID: String, baseURL: String,
-                              report: @escaping (Int64, String) -> Void,
-                              completion: @escaping (Result<Void, Error>) -> Void) {
-
-        guard let fh = try? FileHandle(forReadingFrom: item.url) else {
-            completion(.failure(NSError(domain: "MoonDrop", code: 500,
-                                        userInfo: [NSLocalizedDescriptionKey: "无法读取文件"])))
-            return
+    /// 读取文件的某一段（每个并发任务各开一个句柄，按偏移定位）
+    private static func readChunk(at url: URL, offset: Int64, length: Int64) throws -> Data {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        try handle.seek(toOffset: UInt64(offset))
+        guard let data = try handle.read(upToCount: Int(length)), !data.isEmpty else {
+            throw NSError(domain: "MoonDrop", code: 500,
+                          userInfo: [NSLocalizedDescriptionKey: "读取文件时提前结束"])
         }
-
-        var offset: Int64 = 0
-
-        // 本方法是同步的：分块是异步逐个发出的，句柄必须活到最后一个分块发完。
-        // 不能在函数返回时关闭（defer），否则第二块开始读取就会失败。
-        func finishAndClose() {
-            finish(transferID: transferID, baseURL: baseURL) { result in
-                try? fh.close()
-                completion(result)
-            }
-        }
-
-        func failAndClose(_ error: Error) {
-            try? fh.close()
-            completion(.failure(error))
-        }
-
-        func sendNext() {
-            guard offset < item.size else {
-                finishAndClose()
-                return
-            }
-            let want = Int64(chunkSize)
-            guard let data = try? fh.read(upToCount: Int(want)), !data.isEmpty else {
-                // 读到一半提前结束说明源文件变了，绝不能当成功收尾（否则对端留下截断文件）
-                failAndClose(NSError(domain: "MoonDrop", code: 500, userInfo: [
-                    NSLocalizedDescriptionKey: "读取提前结束（\(offset)/\(item.size) 字节）"
-                ]))
-                return
-            }
-            let currentOffset = offset
-            offset += Int64(data.count)
-
-            var req = URLRequest(url: URL(string: "\(baseURL)/macdrop/chunk?id=\(transferID)&offset=\(currentOffset)")!)
-            req.httpMethod = "POST"
-            req.timeoutInterval = 60
-            req.setValue(String(data.count), forHTTPHeaderField: "Content-Length")
-
-            URLSession.shared.uploadTask(with: req, from: data) { _, resp, err in
-                if let err { return failAndClose(err) }
-                guard let code = (resp as? HTTPURLResponse)?.statusCode, (200..<300).contains(code) else {
-                    return failAndClose(URLError(.badServerResponse))
-                }
-                report(Int64(data.count), item.url.lastPathComponent)
-                sendNext()
-            }.resume()
-        }
-        sendNext()
+        return data
     }
 
-    private func finish(transferID: String, baseURL: String,
-                        completion: @escaping (Result<Void, Error>) -> Void) {
-        var req = URLRequest(url: URL(string: "\(baseURL)/macdrop/finish?id=\(transferID)")!)
-        req.httpMethod = "POST"
-        req.timeoutInterval = 15
-        URLSession.shared.dataTask(with: req) { _, resp, err in
-            if let err { return completion(.failure(err)) }
-            guard let code = (resp as? HTTPURLResponse)?.statusCode, (200..<300).contains(code) else {
-                return completion(.failure(URLError(.badServerResponse)))
+    /// 发送一个分块并等待结果（工作线程里同步调用）
+    private static func postChunk(baseURL: String, transferID: String,
+                                  offset: Int64, data: Data) throws {
+        guard let url = URL(string: "\(baseURL)/macdrop/chunk?id=\(transferID)&offset=\(offset)") else {
+            throw URLError(.badURL)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 60
+        request.setValue(String(data.count), forHTTPHeaderField: "Content-Length")
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: Result<Void, Error> = .success(())
+        URLSession.shared.uploadTask(with: request, from: data) { _, response, error in
+            if let error {
+                result = .failure(error)
+            } else if let code = (response as? HTTPURLResponse)?.statusCode,
+                      !(200..<300).contains(code) {
+                result = .failure(URLError(.badServerResponse))
             }
-            completion(.success(()))
+            semaphore.signal()
         }.resume()
+        semaphore.wait()
+        try result.get()
     }
 
-    private func abort(transferID: String, baseURL: String, completion: @escaping (Result<Void, Error>) -> Void) {
-        var req = URLRequest(url: URL(string: "\(baseURL)/macdrop/abort?id=\(transferID)")!)
-        req.httpMethod = "POST"
-        URLSession.shared.dataTask(with: req) { _, _, _ in completion(.success(())) }.resume()
+    /// 收尾：校验并交付
+    private static func postFinish(baseURL: String, transferID: String) throws {
+        guard let url = URL(string: "\(baseURL)/macdrop/finish?id=\(transferID)") else {
+            throw URLError(.badURL)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: Result<Void, Error> = .success(())
+        URLSession.shared.dataTask(with: request) { _, response, error in
+            if let error {
+                result = .failure(error)
+            } else if let code = (response as? HTTPURLResponse)?.statusCode,
+                      !(200..<300).contains(code) {
+                result = .failure(URLError(.badServerResponse))
+            }
+            semaphore.signal()
+        }.resume()
+        semaphore.wait()
+        try result.get()
+    }
+
+    /// 放弃一个未完成的传输
+    private static func abort(transferID: String, baseURL: String) {
+        guard let url = URL(string: "\(baseURL)/macdrop/abort?id=\(transferID)") else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 10
+        URLSession.shared.dataTask(with: request).resume()
     }
 
     // MARK: - 辅助

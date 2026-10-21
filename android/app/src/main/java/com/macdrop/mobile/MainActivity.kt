@@ -792,7 +792,9 @@ class MainActivity : Activity() {
             cacheDir = cacheDir,
             onProgress = { sent, total, name ->
                 runOnUiThread {
-                    sendingProgress = if (total > 0) sent.toDouble() / total else 0.0
+                    // 并发时回调可能乱序到达，进度只增不减
+                    val fraction = if (total > 0) sent.toDouble() / total else 0.0
+                    sendingProgress = maxOf(sendingProgress, fraction)
                     sendingText = "发送中 ${(sendingProgress * 100).toInt()}% · $name"
                     refreshTransferUi()
                 }

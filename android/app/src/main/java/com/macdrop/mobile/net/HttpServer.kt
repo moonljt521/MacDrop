@@ -89,47 +89,53 @@ class HttpServer(
                 val input = BufferedInputStream(connection.getInputStream())
                 val output = BufferedOutputStream(connection.getOutputStream())
 
-                val header = readHeader(input) ?: return
-                val lines = header.split("\r\n")
-                val requestLine = lines.firstOrNull()?.split(" ") ?: return
-                if (requestLine.size < 2) return
+                // keep-alive：一条连接上连续处理多个请求，
+                // 避免每个分块都重新握手 + 慢启动
+                while (true) {
+                    val header = readHeader(input) ?: return
+                    val lines = header.split("\r\n")
+                    val requestLine = lines.firstOrNull()?.split(" ") ?: return
+                    if (requestLine.size < 2) return
 
-                val method = requestLine[0]
-                val target = requestLine[1]
+                    val method = requestLine[0]
+                    val target = requestLine[1]
 
-                val headers = HashMap<String, String>()
-                for (line in lines.drop(1)) {
-                    val colon = line.indexOf(':')
-                    if (colon <= 0) continue
-                    headers[line.substring(0, colon).trim().lowercase()] =
-                        line.substring(colon + 1).trim()
+                    val headers = HashMap<String, String>()
+                    for (line in lines.drop(1)) {
+                        val colon = line.indexOf(':')
+                        if (colon <= 0) continue
+                        headers[line.substring(0, colon).trim().lowercase()] =
+                            line.substring(colon + 1).trim()
+                    }
+
+                    val length = headers["content-length"]?.toIntOrNull() ?: 0
+                    // 单个分块 2 MB，留出余量；异常/伪造的长度直接拒掉，避免被撑爆内存
+                    if (length < 0 || length > MAX_BODY_BYTES) {
+                        writeResponse(output, Response.text("请求体过大", 413), keepAlive = false)
+                        return
+                    }
+                    val body = ByteArray(length)
+                    var read = 0
+                    while (read < length) {
+                        val count = input.read(body, read, length - read)
+                        if (count < 0) break
+                        read += count
+                    }
+                    if (read != length) return
+
+                    val question = target.indexOf('?')
+                    val path = if (question >= 0) target.substring(0, question) else target
+                    val query = if (question >= 0) parseQuery(target.substring(question + 1)) else emptyMap()
+
+                    val response = try {
+                        router(Request(method, path, query, headers, body))
+                    } catch (error: Exception) {
+                        Response.text("error: ${error.message}", 500)
+                    }
+                    val keepAlive = headers["connection"]?.lowercase() != "close"
+                    writeResponse(output, response, keepAlive)
+                    if (!keepAlive) return
                 }
-
-                val length = headers["content-length"]?.toIntOrNull() ?: 0
-                // 单个分块 2 MB，留出余量；异常/伪造的长度直接拒掉，避免被撑爆内存
-                if (length < 0 || length > MAX_BODY_BYTES) {
-                    writeResponse(output, Response.text("请求体过大", 413))
-                    return
-                }
-                val body = ByteArray(length)
-                var read = 0
-                while (read < length) {
-                    val count = input.read(body, read, length - read)
-                    if (count < 0) break
-                    read += count
-                }
-                if (read != length) return
-
-                val question = target.indexOf('?')
-                val path = if (question >= 0) target.substring(0, question) else target
-                val query = if (question >= 0) parseQuery(target.substring(question + 1)) else emptyMap()
-
-                val response = try {
-                    router(Request(method, path, query, headers, body))
-                } catch (error: Exception) {
-                    Response.text("error: ${error.message}", 500)
-                }
-                writeResponse(output, response)
             }
         } catch (_: Exception) {
         }
@@ -153,7 +159,7 @@ class HttpServer(
         return buffer.toString("UTF-8")
     }
 
-    private fun writeResponse(output: BufferedOutputStream, response: Response) {
+    private fun writeResponse(output: BufferedOutputStream, response: Response, keepAlive: Boolean = true) {
         val reason = when (response.status) {
             200 -> "OK"
             400 -> "Bad Request"
@@ -167,7 +173,7 @@ class HttpServer(
             append("HTTP/1.1 ${response.status} $reason\r\n")
             append("Content-Type: ${response.contentType}\r\n")
             append("Content-Length: ${response.body.size}\r\n")
-            append("Connection: close\r\n\r\n")
+            append(if (keepAlive) "Connection: keep-alive\r\n\r\n" else "Connection: close\r\n\r\n")
         }
         output.write(head.toByteArray(Charsets.UTF_8))
         output.write(response.body)

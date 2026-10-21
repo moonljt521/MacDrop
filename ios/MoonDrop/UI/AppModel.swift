@@ -328,7 +328,9 @@ final class AppModel: ObservableObject {
         client.send(files: files, to: peer, progress: { [weak self] sent, total, name in
             Task { @MainActor in
                 guard let self else { return }
-                self.sendProgress = total > 0 ? Double(sent) / Double(total) : 0
+                // 并发时回调可能乱序到达，进度只增不减
+                let fraction = total > 0 ? Double(sent) / Double(total) : 0
+                self.sendProgress = max(self.sendProgress, fraction)
                 self.sendText = "发送中 \(Int(self.sendProgress * 100))% · \(name)"
             }
         }, completion: { [weak self] result in

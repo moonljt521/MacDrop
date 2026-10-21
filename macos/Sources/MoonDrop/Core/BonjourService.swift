@@ -9,6 +9,8 @@ struct Peer: Identifiable, Equatable {
     var port: UInt16
     var name: String
     var isManual: Bool = false
+    /// 同一台设备的其它可用地址：首选地址连不通时依次尝试
+    var alternatives: [String] = []
 
     static func == (a: Peer, b: Peer) -> Bool { a.id == b.id }
 }
@@ -194,13 +196,15 @@ extension BonjourService: NetServiceDelegate {
     func netServiceDidResolveAddress(_ sender: NetService) {
         resolving.remove(sender)
         cancelPendingRemoval(serviceName: sender.name)
-        guard let host = BonjourService.pickHost(from: sender.addresses ?? []) else {
+        let candidates = BonjourService.candidates(from: sender.addresses ?? [])
+        guard let best = candidates.first else {
             NSLog("[MoonDrop] 解析地址失败: \(sender.name)")
             return
         }
-        upsert(Peer(host: host,
-                    port: UInt16(sender.port),
-                    name: sender.name),
+        upsert(Peer(host: best.ip,
+                    port: UInt16(clamping: sender.port),
+                    name: sender.name,
+                    alternatives: candidates.dropFirst().map { $0.ip }),
                serviceName: sender.name)
     }
 
@@ -215,14 +219,39 @@ extension BonjourService: NetServiceDelegate {
     /// 从一组地址里挑一个可直接拼进 http://host:port 的。
     /// 必须 IPv4 优先：URL 里 IPv6 要加方括号才合法，且 NetService 返回的地址顺序不稳定，
     /// 一旦取到裸 IPv6 就会拼出坏 URL，发送直接失败。
-    private static func pickHost(from addresses: [Data]) -> String? {
-        var firstV6: String?
+    /// 按可用性排序的地址列表。
+    /// 局域网可路由 IPv4 优先，其次其它 IPv4，最后才是 169.254 链路本地（AWDL）。
+    /// AWDL 首次建链要 1~2 秒，而局域网地址是现成的，能明显缩短首次传输的等待。
+    private static func candidates(from addresses: [Data]) -> [(ip: String, score: Int)] {
+        var result: [(ip: String, score: Int)] = []
         for data in addresses {
             guard let (ip, isV6) = hostAddress(from: data) else { continue }
-            if !isV6 { return ip }
-            if firstV6 == nil { firstV6 = ip }
+            result.append((ip, score(ip: ip, isV6: isV6)))
         }
-        return firstV6.map { "[\($0)]" }
+        return result.enumerated()
+            .sorted { lhs, rhs in
+                if lhs.element.score != rhs.element.score { return lhs.element.score < rhs.element.score }
+                return lhs.offset < rhs.offset
+            }
+            .map { $0.element }
+    }
+
+    private static func score(ip: String, isV6: Bool) -> Int {
+        if !isV6 {
+            if ip.hasPrefix("169.254.") { return 3 }     // 链路本地：AWDL
+            if isPrivateIPv4(ip) { return 0 }             // 10/172.16-31/192.168
+            return 1
+        }
+        return ip.lowercased().hasPrefix("fe80:") ? 4 : 2
+    }
+
+    private static func isPrivateIPv4(_ ip: String) -> Bool {
+        let parts = ip.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4 else { return false }
+        if parts[0] == 10 { return true }
+        if parts[0] == 172 && (16...31).contains(parts[1]) { return true }
+        if parts[0] == 192 && parts[1] == 168 { return true }
+        return false
     }
 
     /// 从 sockaddr Data 里取数字 IP，并返回是否 IPv6

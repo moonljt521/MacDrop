@@ -127,14 +127,38 @@ final class PeerBrowser: NSObject {
         }
     }
 
-    private static func pickHost(from addresses: [Data]) -> String? {
-        var firstV6: String?
+    /// 按可用性排序的地址列表：局域网可路由 IPv4 优先，
+    /// 最后才是 169.254 链路本地（AWDL，首次建链要 1~2 秒）
+    private static func candidates(from addresses: [Data]) -> [(ip: String, score: Int)] {
+        var result: [(ip: String, score: Int)] = []
         for data in addresses {
             guard let (ip, isV6) = hostAddress(from: data) else { continue }
-            if !isV6 { return ip }
-            if firstV6 == nil { firstV6 = ip }
+            result.append((ip, score(ip: ip, isV6: isV6)))
         }
-        return firstV6.map { "[\($0)]" }
+        return result.enumerated()
+            .sorted { lhs, rhs in
+                if lhs.element.score != rhs.element.score { return lhs.element.score < rhs.element.score }
+                return lhs.offset < rhs.offset
+            }
+            .map { $0.element }
+    }
+
+    private static func score(ip: String, isV6: Bool) -> Int {
+        if !isV6 {
+            if ip.hasPrefix("169.254.") { return 3 }     // 链路本地：AWDL
+            if isPrivateIPv4(ip) { return 0 }             // 10/172.16-31/192.168
+            return 1
+        }
+        return ip.lowercased().hasPrefix("fe80:") ? 4 : 2
+    }
+
+    private static func isPrivateIPv4(_ ip: String) -> Bool {
+        let parts = ip.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4 else { return false }
+        if parts[0] == 10 { return true }
+        if parts[0] == 172 && (16...31).contains(parts[1]) { return true }
+        if parts[0] == 192 && parts[1] == 168 { return true }
+        return false
     }
 
     private static func hostAddress(from data: Data) -> (String, Bool)? {
@@ -196,15 +220,17 @@ extension PeerBrowser: NetServiceDelegate {
 
     func netServiceDidResolveAddress(_ sender: NetService) {
         resolving.remove(sender)
-        guard let host = PeerBrowser.pickHost(from: sender.addresses ?? []) else {
+        let candidates = PeerBrowser.candidates(from: sender.addresses ?? [])
+        guard let best = candidates.first else {
             MobileLog.write("解析地址失败：\(sender.name)")
             return
         }
-        if isSelf(sender) || isResolvedSelf(host: host, port: UInt16(clamping: sender.port)) {
+        if isSelf(sender) || isResolvedSelf(host: best.ip, port: UInt16(clamping: sender.port)) {
             remove(serviceName: sender.name)
             return
         }
-        upsert(Peer(name: sender.name, host: host, port: UInt16(clamping: sender.port)),
+        upsert(Peer(name: sender.name, host: best.ip, port: UInt16(clamping: sender.port),
+                    alternatives: candidates.dropFirst().map { $0.ip }),
                serviceName: sender.name)
     }
 

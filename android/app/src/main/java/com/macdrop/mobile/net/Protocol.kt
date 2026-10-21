@@ -6,7 +6,9 @@ data class Peer(
     val name: String,
     val host: String,
     val port: Int,
-    val manual: Boolean = false
+    val manual: Boolean = false,
+    /** 同一台设备的其它可用地址：首选地址连不通时依次尝试 */
+    val alternatives: List<String> = emptyList()
 ) {
     val id: String get() = "$name@$host:$port"
     val endpoint: String get() = "$host:$port"

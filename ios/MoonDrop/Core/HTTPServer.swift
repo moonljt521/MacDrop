@@ -90,39 +90,57 @@ final class HTTPServer {
         var buffer = Data()
         var request = Request()
         var expectedBody = 0
-        var state = 0
+        var state = 0 // 0=读头 1=读体 2=已应答
+        var closing = false
+        var stopped = false
 
-        func failAndClose(_ message: String) {
-            send(connection, .failure(message)) { connection.cancel() }
+        // keep-alive：应答后不关闭连接，继续处理同一连接上的下一个请求
+        func respond(_ response: Response) {
+            send(connection, response, keepAlive: !closing) {
+                if closing {
+                    connection.cancel()
+                    return
+                }
+                buffer.removeAll(keepingCapacity: true)
+                request = Request()
+                expectedBody = 0
+                state = 0
+                receiveNext()
+            }
         }
 
-        func parseHeaderIfNeeded() -> Bool {
-            guard state == 0 else { return false }
-            guard let range = buffer.range(of: HTTPServer.headerEnd) else { return false }
+        func failAndClose(_ message: String) {
+            closing = true
+            stopped = true
+            send(connection, .failure(message), keepAlive: false) { connection.cancel() }
+        }
+
+        func parseHeaderIfNeeded() {
+            guard state == 0 else { return }
+            guard let range = buffer.range(of: HTTPServer.headerEnd) else { return }
             let headerData = buffer.subdata(in: buffer.startIndex..<range.lowerBound)
             buffer.removeSubrange(buffer.startIndex..<range.upperBound)
             guard let parsed = HTTPServer.parseHeader(headerData) else {
                 failAndClose("malformed header")
-                return true
+                return
             }
             request = parsed
+            if request.headers["connection"]?.lowercased() == "close" { closing = true }
             expectedBody = Int(request.headers["content-length"] ?? "0") ?? 0
             // 单个分块 2 MB；异常/伪造的长度直接拒掉，避免被撑爆内存
             guard expectedBody <= Self.maxBodyBytes else {
                 failAndClose("请求体过大")
-                return true
+                return
             }
             state = 1
-            return false
         }
 
-        func handleBodyIfComplete() -> Bool {
-            guard state == 1 else { return false }
-            guard buffer.count >= expectedBody else { return false }
-            request.body = buffer.prefix(expectedBody)
+        func handleBodyIfComplete() {
+            guard state == 1, buffer.count >= expectedBody else { return }
+            request.body = Data(buffer.prefix(expectedBody))
+            buffer.removeSubrange(buffer.startIndex..<(buffer.startIndex + expectedBody))
             state = 2
-            send(connection, handler(request)) { connection.cancel() }
-            return true
+            respond(handler(request))
         }
 
         func receiveNext() {
@@ -130,15 +148,24 @@ final class HTTPServer {
                 data, _, isComplete, error in
                 if let data, !data.isEmpty {
                     buffer.append(data)
-                    if !parseHeaderIfNeeded(), !handleBodyIfComplete() {
-                        receiveNext()
-                        return
+                    if state == 0 {
+                        parseHeaderIfNeeded()
+                        if stopped { return }
+                        if state == 0 {   // 头还没收全
+                            receiveNext()
+                            return
+                        }
                     }
+                    if state == 1 {
+                        handleBodyIfComplete()
+                        if state == 2 { return }   // 等应答写完再继续
+                    }
+                    receiveNext()
                 } else if isComplete || error != nil {
                     connection.cancel()
-                    return
+                } else {
+                    receiveNext()
                 }
-                receiveNext()
             }
         }
 
@@ -147,11 +174,12 @@ final class HTTPServer {
 
     private func send(_ connection: NWConnection,
                       _ response: Response,
+                      keepAlive: Bool = true,
                       completion: @escaping () -> Void) {
         var head = "HTTP/1.1 \(response.status) \(HTTPServer.reason(response.status))\r\n"
         var headers = response.headers
         headers["Content-Length"] = String(response.body.count)
-        headers["Connection"] = "close"
+        headers["Connection"] = keepAlive ? "keep-alive" : "close"
         for (key, value) in headers {
             head += "\(key): \(value)\r\n"
         }

@@ -91,7 +91,15 @@ final class Config {
 
     // MARK: - 运行时数据目录
 
-    /// App 的运行时数据根目录：~/Library/Application Support/MoonDrop/
+    /// 同时在途的连接数（分块级并发）。
+    /// 太多会挤占带宽与内存，1 表示退回串行。
+    static var parallelChunks: Int {
+        let stored = UserDefaults.standard.integer(forKey: "com.macdrop.parallelChunks")
+        let value = stored == 0 ? 3 : stored
+        return min(max(value, 1), 8)
+    }
+
+    /// 运行时数据根目录：~/Library/Application Support/MoonDrop/
     ///
     /// 刻意不放项目目录，也不放 Caches：
     ///   - 不放项目目录 → 拷贝 .app 给别的 Mac 时不会带上这些
