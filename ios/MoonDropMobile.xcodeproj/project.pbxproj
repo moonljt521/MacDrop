@@ -1,0 +1,500 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		369D9F25E3A90F9C9F0A6B5B /* MoonDropApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F8E728517806DB841C006DA /* MoonDropApp.swift */; };
+		36B1C77B04CA4D531B33B3AC /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 860981DB9FEFDADBAA740D7C /* ContentView.swift */; };
+		447E2FEF4746F495F7E12B95 /* TransferClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D13AD2CFEAADF9CC0AA4A90 /* TransferClient.swift */; };
+		5EA62E69DC85947BDB44FE9A /* TransferServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59E4503850C120000F88B8FA /* TransferServer.swift */; };
+		7CC560789C6D0A522F9C4AAB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F239E0557DE8A4BF65CFE1D7 /* Assets.xcassets */; };
+		831A75CEA716171189B5C140 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28AD674F82A45E9BB2B18A6D /* ShareViewController.swift */; };
+		8E8C7E6F9EEDC290ED91FFC4 /* HTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9BD9983767689966A48E4FD /* HTTPServer.swift */; };
+		AE636B7C62E91FA331B49EF4 /* MoonDropShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 8D10744A752E1A33A4D45E40 /* MoonDropShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		C87DA4DCC7C2F571B967BAEF /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70004AC12CE265A4BC2BD7DB /* AppModel.swift */; };
+		D2584128A63C42A24E86A886 /* FileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7455CEAE9F7D5D1E9DE28DAC /* FileStore.swift */; };
+		DE5815A3467BD28A605BE71E /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31BCD6740F3D4317281A2C41 /* Models.swift */; };
+		DE7C21C89B25BF411F88279B /* PeerBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46D3DFAD7AF764DD61D5BE22 /* PeerBrowser.swift */; };
+		F28DD9C079457E46E30709C4 /* QuickLookPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = D035017CE9D5633355C83D14 /* QuickLookPreview.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		DA4B5F4A71D8239031FB2E41 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CC99CC931CB28E8B6CAEBD9A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C6989B889DA03057D8E97A6B;
+			remoteInfo = MoonDropShare;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		EA0B27C48959A13CDB27F400 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				AE636B7C62E91FA331B49EF4 /* MoonDropShare.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		002D7E85A718C198C3301586 /* MoonDropShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MoonDropShare.entitlements; sourceTree = "<group>"; };
+		1F8E728517806DB841C006DA /* MoonDropApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoonDropApp.swift; sourceTree = "<group>"; };
+		28AD674F82A45E9BB2B18A6D /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		31BCD6740F3D4317281A2C41 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		46D3DFAD7AF764DD61D5BE22 /* PeerBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerBrowser.swift; sourceTree = "<group>"; };
+		4BD321994E24646CC4287429 /* MoonDropMobile.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = MoonDropMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		59E4503850C120000F88B8FA /* TransferServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferServer.swift; sourceTree = "<group>"; };
+		70004AC12CE265A4BC2BD7DB /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		7455CEAE9F7D5D1E9DE28DAC /* FileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileStore.swift; sourceTree = "<group>"; };
+		7F718897AB8E3F8157E25FFF /* MoonDrop.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MoonDrop.entitlements; sourceTree = "<group>"; };
+		860981DB9FEFDADBAA740D7C /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		8D10744A752E1A33A4D45E40 /* MoonDropShare.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = MoonDropShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		9D13AD2CFEAADF9CC0AA4A90 /* TransferClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferClient.swift; sourceTree = "<group>"; };
+		D035017CE9D5633355C83D14 /* QuickLookPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickLookPreview.swift; sourceTree = "<group>"; };
+		F239E0557DE8A4BF65CFE1D7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		F9BD9983767689966A48E4FD /* HTTPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPServer.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		396EAF6E882AA6F6D2DD6591 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				4BD321994E24646CC4287429 /* MoonDropMobile.app */,
+				8D10744A752E1A33A4D45E40 /* MoonDropShare.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		624BB2287A524ACF2B55B149 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				7455CEAE9F7D5D1E9DE28DAC /* FileStore.swift */,
+				F9BD9983767689966A48E4FD /* HTTPServer.swift */,
+				31BCD6740F3D4317281A2C41 /* Models.swift */,
+				46D3DFAD7AF764DD61D5BE22 /* PeerBrowser.swift */,
+				9D13AD2CFEAADF9CC0AA4A90 /* TransferClient.swift */,
+				59E4503850C120000F88B8FA /* TransferServer.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		7C32CD4D8FEC620720466810 = {
+			isa = PBXGroup;
+			children = (
+				BD983B3466B44F8140EA255B /* MoonDrop */,
+				CBCF6A93B037310F3077AD5A /* MoonDropShare */,
+				396EAF6E882AA6F6D2DD6591 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		AE28B6EB2FBCC1E1B523D374 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				70004AC12CE265A4BC2BD7DB /* AppModel.swift */,
+				860981DB9FEFDADBAA740D7C /* ContentView.swift */,
+				D035017CE9D5633355C83D14 /* QuickLookPreview.swift */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		BD983B3466B44F8140EA255B /* MoonDrop */ = {
+			isa = PBXGroup;
+			children = (
+				F239E0557DE8A4BF65CFE1D7 /* Assets.xcassets */,
+				7F718897AB8E3F8157E25FFF /* MoonDrop.entitlements */,
+				1F8E728517806DB841C006DA /* MoonDropApp.swift */,
+				624BB2287A524ACF2B55B149 /* Core */,
+				AE28B6EB2FBCC1E1B523D374 /* UI */,
+			);
+			path = MoonDrop;
+			sourceTree = "<group>";
+		};
+		CBCF6A93B037310F3077AD5A /* MoonDropShare */ = {
+			isa = PBXGroup;
+			children = (
+				002D7E85A718C198C3301586 /* MoonDropShare.entitlements */,
+				28AD674F82A45E9BB2B18A6D /* ShareViewController.swift */,
+			);
+			path = MoonDropShare;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		C6989B889DA03057D8E97A6B /* MoonDropShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = ECAF094CA3CE8E3416CBDCDD /* Build configuration list for PBXNativeTarget "MoonDropShare" */;
+			buildPhases = (
+				ACC7413E8DFBDE39BD35F802 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MoonDropShare;
+			packageProductDependencies = (
+			);
+			productName = MoonDropShare;
+			productReference = 8D10744A752E1A33A4D45E40 /* MoonDropShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		DE5E3A543E4F807411475999 /* MoonDropMobile */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DE8B0B94D6886C58349D5DB8 /* Build configuration list for PBXNativeTarget "MoonDropMobile" */;
+			buildPhases = (
+				B234A3063B6E840D6D71BF65 /* Sources */,
+				298DCD0D2985E91989EB6F0D /* Resources */,
+				EA0B27C48959A13CDB27F400 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				734B1808AF1D087A7C880886 /* PBXTargetDependency */,
+			);
+			name = MoonDropMobile;
+			packageProductDependencies = (
+			);
+			productName = MoonDropMobile;
+			productReference = 4BD321994E24646CC4287429 /* MoonDropMobile.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		CC99CC931CB28E8B6CAEBD9A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					C6989B889DA03057D8E97A6B = {
+						DevelopmentTeam = 75L84BV98K;
+						ProvisioningStyle = Automatic;
+					};
+					DE5E3A543E4F807411475999 = {
+						DevelopmentTeam = 75L84BV98K;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 723B12794F72EF720B276851 /* Build configuration list for PBXProject "MoonDropMobile" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 7C32CD4D8FEC620720466810;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 396EAF6E882AA6F6D2DD6591 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				DE5E3A543E4F807411475999 /* MoonDropMobile */,
+				C6989B889DA03057D8E97A6B /* MoonDropShare */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		298DCD0D2985E91989EB6F0D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7CC560789C6D0A522F9C4AAB /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		ACC7413E8DFBDE39BD35F802 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				831A75CEA716171189B5C140 /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B234A3063B6E840D6D71BF65 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C87DA4DCC7C2F571B967BAEF /* AppModel.swift in Sources */,
+				36B1C77B04CA4D531B33B3AC /* ContentView.swift in Sources */,
+				D2584128A63C42A24E86A886 /* FileStore.swift in Sources */,
+				8E8C7E6F9EEDC290ED91FFC4 /* HTTPServer.swift in Sources */,
+				DE5815A3467BD28A605BE71E /* Models.swift in Sources */,
+				369D9F25E3A90F9C9F0A6B5B /* MoonDropApp.swift in Sources */,
+				DE7C21C89B25BF411F88279B /* PeerBrowser.swift in Sources */,
+				F28DD9C079457E46E30709C4 /* QuickLookPreview.swift in Sources */,
+				447E2FEF4746F495F7E12B95 /* TransferClient.swift in Sources */,
+				5EA62E69DC85947BDB44FE9A /* TransferServer.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		734B1808AF1D087A7C880886 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C6989B889DA03057D8E97A6B /* MoonDropShare */;
+			targetProxy = DA4B5F4A71D8239031FB2E41 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		1EE0700C898E78B7B33F8078 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MoonDrop/MoonDrop.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 75L84BV98K;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MoonDrop/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.macdrop.mobile;
+				PRODUCT_NAME = MoonDrop;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		2AC28C2F4304BDF54CE94B57 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = MoonDropShare/MoonDropShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 75L84BV98K;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MoonDropShare/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.macdrop.mobile.share;
+				PRODUCT_NAME = MoonDropShare;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		4C42CF252C6953B171F92EDB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MoonDrop/MoonDrop.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 75L84BV98K;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MoonDrop/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.macdrop.mobile;
+				PRODUCT_NAME = MoonDrop;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		966A2E30DF970DD05F95EC7E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = MoonDropShare/MoonDropShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 75L84BV98K;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MoonDropShare/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.macdrop.mobile.share;
+				PRODUCT_NAME = MoonDropShare;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		9D6FF15C537CEBDB07FC361E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 2;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 1.5.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		D0E895FDE3D518CFCAAB0826 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 2;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 1.5.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		723B12794F72EF720B276851 /* Build configuration list for PBXProject "MoonDropMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D0E895FDE3D518CFCAAB0826 /* Debug */,
+				9D6FF15C537CEBDB07FC361E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		DE8B0B94D6886C58349D5DB8 /* Build configuration list for PBXNativeTarget "MoonDropMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1EE0700C898E78B7B33F8078 /* Debug */,
+				4C42CF252C6953B171F92EDB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		ECAF094CA3CE8E3416CBDCDD /* Build configuration list for PBXNativeTarget "MoonDropShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2AC28C2F4304BDF54CE94B57 /* Debug */,
+				966A2E30DF970DD05F95EC7E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = CC99CC931CB28E8B6CAEBD9A /* Project object */;
+}
