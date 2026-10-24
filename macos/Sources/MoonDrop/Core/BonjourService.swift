@@ -193,6 +193,15 @@ extension BonjourService: NetServiceBrowserDelegate {
 }
 
 extension BonjourService: NetServiceDelegate {
+    func netServiceDidPublish(_ sender: NetService) {
+        NSLog("[MoonDrop] Bonjour 广告已上线: \(sender.name) (端口 \(sender.port))")
+    }
+
+    /// 本地网络权限被拒时，注册可能既不成功也不报错；这里必须留痕，否则问题无从排查。
+    func netService(_ sender: NetService, didNotPublish errorDict: [String: NSNumber]) {
+        NSLog("[MoonDrop] Bonjour 广告失败: \(errorDict)")
+    }
+
     func netServiceDidResolveAddress(_ sender: NetService) {
         resolving.remove(sender)
         cancelPendingRemoval(serviceName: sender.name)
