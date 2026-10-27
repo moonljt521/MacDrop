@@ -71,14 +71,14 @@ struct ContentView: View {
             }
             .onOpenURL { url in
                 if url.scheme == "moondrop" {
-                    model.ingestSharedFiles()
+                    model.handleSharedLink()
                 } else {
                     model.handleIncoming(urls: [url])
                 }
             }
             .onChange(of: scenePhase) { phase in
                 if phase == .active {
-                    model.ingestSharedFiles()
+                    model.handleForeground()
                 }
             }
         }

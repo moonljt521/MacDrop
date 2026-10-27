@@ -49,15 +49,25 @@ final class AppModel: ObservableObject {
     private var queuedPickedURLs: [URL] = []
     private var pickerForPending = false
 
+    // 从分享扩展回来后自动弹出设备选择，避免用户再进列表里找待发送
+    private var autoPickerPending = false
+    private var autoPickerTimeout: DispatchWorkItem?
+
     init() {
         let defaults = UserDefaults.standard
+        let sharedDefaults = UserDefaults(suiteName: Self.appGroupID)
         if let saved = defaults.string(forKey: Self.deviceIDKey) {
             deviceID = saved
+        } else if let saved = sharedDefaults?.string(forKey: Self.deviceIDKey) {
+            deviceID = saved
+            defaults.set(saved, forKey: Self.deviceIDKey)
         } else {
             let generated = UUID().uuidString
             defaults.set(generated, forKey: Self.deviceIDKey)
             deviceID = generated
         }
+        // 分享扩展用同一个 ID 过滤掉本机广播
+        sharedDefaults?.set(deviceID, forKey: Self.deviceIDKey)
 
         let rawName = UIDevice.current.name.trimmingCharacters(in: .whitespacesAndNewlines)
         deviceName = rawName.isEmpty ? "iPhone" : rawName
@@ -65,6 +75,9 @@ final class AppModel: ObservableObject {
         store = FileStore()
         server = TransferServer(deviceName: deviceName, store: store)
         browser = PeerBrowser(ownID: deviceID)
+
+        // 必须在任何 onOpenURL 取回文件之前清，避免误删刚取回的分享副本
+        cleanupAbandonedIncoming()
 
         browser.onPeersChanged = { [weak self] peers in
             Task { @MainActor in self?.applyDiscovered(peers) }
@@ -98,21 +111,36 @@ final class AppModel: ObservableObject {
             }
         }
 
-        ingestSharedFiles()
+        handleForeground()
+    }
+
+    /// 回到前台时取回分享扩展暂存的文件。
+    func handleForeground() {
+        if ingestSharedFiles() {
+            schedulePendingPicker()
+        }
+    }
+
+    /// 从 moondrop://incoming 进来：取回文件后直接进入选设备流程。
+    func handleSharedLink() {
+        _ = ingestSharedFiles()
+        guard pendingCount > 0 else { return }
+        schedulePendingPicker()
     }
 
     /// 分享扩展把文件放到 App Group，主 App 启动/回到前台时取回。
-    func ingestSharedFiles() {
+    @discardableResult
+    func ingestSharedFiles() -> Bool {
         guard let container = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: Self.appGroupID
-        ) else { return }
+        ) else { return false }
 
         let pendingRoot = container.appendingPathComponent("Pending", isDirectory: true)
         guard let sessions = try? FileManager.default.contentsOfDirectory(
             at: pendingRoot,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
-        ) else { return }
+        ) else { return false }
 
         var incoming: [URL] = []
         for session in sessions {
@@ -139,11 +167,54 @@ final class AppModel: ObservableObject {
             try? FileManager.default.removeItem(at: session)
         }
 
-        guard !incoming.isEmpty else { return }
-        pendingURLs.append(contentsOf: incoming)
+        guard !incoming.isEmpty else { return false }
+        let known = Set(pendingURLs.map { $0.standardizedFileURL.path })
+        let fresh = incoming.filter { !known.contains($0.standardizedFileURL.path) }
+        guard !fresh.isEmpty else { return false }
+
+        pendingURLs.append(contentsOf: fresh)
         pendingCount = pendingURLs.count
         resultText = ""
         resultIsError = false
+        MobileLog.write("取回分享文件 \(fresh.count) 个，待发送 \(pendingCount) 个")
+        return true
+    }
+
+    /// 上次异常退出留下的分享副本，启动时清掉。
+    private func cleanupAbandonedIncoming() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MoonDropIncoming", isDirectory: true)
+        try? FileManager.default.removeItem(at: root)
+
+        guard let container = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: Self.appGroupID
+        ) else { return }
+        let pendingRoot = container.appendingPathComponent("Pending", isDirectory: true)
+        let items = (try? FileManager.default.contentsOfDirectory(
+            at: pendingRoot,
+            includingPropertiesForKeys: nil,
+            options: []
+        )) ?? []
+        for item in items where item.lastPathComponent.hasPrefix(".staging-") {
+            try? FileManager.default.removeItem(at: item)
+        }
+    }
+
+    /// 只删除分享扩展复制进来的临时副本，外部 App 的 security-scoped 文件不动。
+    private func removeIncomingCopies(of urls: [URL]) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MoonDropIncoming", isDirectory: true)
+            .standardizedFileURL
+        var sessions = Set<URL>()
+        for url in urls {
+            let normalized = url.standardizedFileURL
+            guard normalized.path.hasPrefix(root.path + "/") else { continue }
+            sessions.insert(normalized.deletingLastPathComponent())
+        }
+        for session in sessions {
+            try? FileManager.default.removeItem(at: session)
+            MobileLog.write("清理分享副本 \(session.lastPathComponent)")
+        }
     }
 
     // MARK: - 设备
@@ -164,6 +235,36 @@ final class AppModel: ObservableObject {
         peers = byEndpoint.values.sorted {
             $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
+        presentPendingPickerIfReady()
+    }
+
+    /// 分享文件取回后，等设备出现就直接弹选择器；6 秒内没有设备则明确提示。
+    private func schedulePendingPicker() {
+        guard pendingCount > 0, !sending else { return }
+        autoPickerPending = true
+        autoPickerTimeout?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.autoPickerPending else { return }
+            self.autoPickerPending = false
+            guard self.pendingCount > 0 else { return }
+            if self.peers.isEmpty {
+                self.reportError("待发送文件已就绪，但没有发现其他设备。请确认对方已打开 MoonDrop。")
+            } else {
+                self.sendPending()
+            }
+        }
+        autoPickerTimeout = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: work)
+        presentPendingPickerIfReady()
+    }
+
+    private func presentPendingPickerIfReady() {
+        guard autoPickerPending, pendingCount > 0, !sending, !peers.isEmpty else { return }
+        autoPickerPending = false
+        autoPickerTimeout?.cancel()
+        autoPickerTimeout = nil
+        MobileLog.write("待发送就绪，自动弹出设备选择")
+        sendPending()
     }
 
     @MainActor
@@ -233,6 +334,9 @@ final class AppModel: ObservableObject {
     func cancelDevicePicker() {
         pickerForPending = false
         queuedPickedURLs = []
+        autoPickerPending = false
+        autoPickerTimeout?.cancel()
+        autoPickerTimeout = nil
     }
 
     /// 其他 App 通过「用 MoonDrop 打开」传进来的文件。
@@ -260,6 +364,7 @@ final class AppModel: ObservableObject {
         pendingCount = pendingURLs.count
         resultText = ""
         resultIsError = false
+        schedulePendingPicker()
     }
 
     func sendPending() {
@@ -281,13 +386,21 @@ final class AppModel: ObservableObject {
         pendingScopes = []
         pendingCount = 0
         send(urls: urls, to: peer, scopes: scopes) { [weak self] result in
-            guard case .failure = result else { return }
-            // 失败就把文件放回待发送，用户可以直接重试
             Task { @MainActor in
                 guard let self else { return }
-                self.pendingURLs = urls + self.pendingURLs
-                self.pendingScopes = scopes + self.pendingScopes
-                self.pendingCount = self.pendingURLs.count
+                switch result {
+                case .success:
+                    // 发送成功后删掉分享扩展复制进来的临时副本
+                    self.removeIncomingCopies(of: urls)
+                    MobileLog.write("待发送已清空（\(urls.count) 个）")
+                case .failure:
+                    // 失败就把文件放回待发送，用户可以直接重试
+                    let known = Set(self.pendingURLs.map { $0.standardizedFileURL.path })
+                    let restored = urls.filter { !known.contains($0.standardizedFileURL.path) }
+                    self.pendingURLs = restored + self.pendingURLs
+                    self.pendingScopes = scopes + self.pendingScopes
+                    self.pendingCount = self.pendingURLs.count
+                }
             }
         }
     }
@@ -296,9 +409,13 @@ final class AppModel: ObservableObject {
         for (url, started) in pendingScopes where started {
             url.stopAccessingSecurityScopedResource()
         }
+        removeIncomingCopies(of: pendingURLs)
         pendingScopes = []
         pendingURLs = []
         pendingCount = 0
+        autoPickerPending = false
+        autoPickerTimeout?.cancel()
+        autoPickerTimeout = nil
         resultText = "已取消"
         resultIsError = false
     }

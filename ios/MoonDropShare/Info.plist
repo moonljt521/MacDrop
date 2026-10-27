@@ -20,6 +20,12 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_macdrop._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>MoonDrop 需要在局域网内发现其他 Mac / iPhone / Android，并直接传输文件。</string>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionAttributes</key>

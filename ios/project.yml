@@ -46,6 +46,9 @@ targets:
       - path: MoonDropShare
         excludes:
           - Info.plist
+      - path: MoonDrop/Core/Models.swift
+      - path: MoonDrop/Core/PeerBrowser.swift
+      - path: MoonDrop/Core/TransferClient.swift
     entitlements:
       path: MoonDropShare/MoonDropShare.entitlements
       properties:
