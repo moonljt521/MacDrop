@@ -75,6 +75,8 @@ class MainActivity : Activity() {
     private var sendResult = ""
     private var lastReceiveResult = ""
     private var pendingInstall: ReceivedEntry? = null
+    private var autoPickerArmed = false
+    private var chooserVisible = false
 
     private val client = TransferClient()
     private val store by lazy { MediaStoreStore(this) }
@@ -98,6 +100,7 @@ class MainActivity : Activity() {
         ReceiverRuntime.addListener(runtimeListener)
         refreshRuntime()
         refreshReceived()
+        clearOutgoingCache()
         handleIncomingIntent(intent)
     }
 
@@ -122,6 +125,7 @@ class MainActivity : Activity() {
                 toast("尚未允许安装未知应用")
             }
         }
+        maybeAutoPresent()
     }
 
     override fun onPause() {
@@ -209,6 +213,7 @@ class MainActivity : Activity() {
             text = "取消"
             setOnClickListener {
                 pendingUris.clear()
+                autoPickerArmed = false
                 updatePendingUi()
             }
         }
@@ -414,9 +419,35 @@ class MainActivity : Activity() {
         com.macdrop.mobile.net.MobileLog.write(
             "收到外部文件 ${uris.size} 个：${uris.joinToString { it.lastPathSegment ?: "?" }}"
         )
-        pendingUris.clear()
-        pendingUris.addAll(uris)
+        // 追加而不是覆盖：上一批失败/未发送的文件不能被新分享冲掉
+        val known = pendingUris.map { it.toString() }.toHashSet()
+        var added = false
+        for (uri in uris) {
+            if (known.add(uri.toString())) {
+                pendingUris.add(uri)
+                added = true
+            }
+        }
+        if (!added) return
+        autoPickerArmed = true
         updatePendingUi()
+        handler.post { maybeAutoPresent() }
+    }
+
+    /// 分享/打开文件后直接弹设备选择，不用再手动点「选择设备并发送」。
+    private fun maybeAutoPresent() {
+        if (!autoPickerArmed) return
+        if (!screenVisible || isFinishing || isDestroyed) return
+        if (pendingUris.isEmpty() || sending || chooserVisible) return
+        autoPickerArmed = false
+        sendPending()
+    }
+
+    private fun clearOutgoingCache() {
+        try {
+            java.io.File(cacheDir, "outgoing").deleteRecursively()
+        } catch (_: Exception) {
+        }
     }
 
     @Suppress("DEPRECATION")
@@ -671,7 +702,7 @@ class MainActivity : Activity() {
         // 设备可能在暂停/恢复后陆续解析出来：等列表数量稳定再弹，
         // 避免只解析到一台时就把选择器弹出来。
         if (peers.isEmpty()) {
-            if (attempt < 4) {
+            if (attempt < 6) {
                 handler.postDelayed({
                     presentDeviceChooser(files, fromPending, restoreUris, attempt + 1, 0)
                 }, 500)
@@ -688,17 +719,28 @@ class MainActivity : Activity() {
         }
 
         val labels = peers.map { "${it.name}  (${it.host}:${it.port})" }.toTypedArray()
-        AlertDialog.Builder(this)
+        var picked = false
+        val dialog = AlertDialog.Builder(this)
             .setTitle("发送到哪台设备？")
             .setItems(labels) { _, which ->
+                picked = true
                 if (fromPending) {
-                    pendingUris.clear()
+                    // 只移除本次真正发送的，弹窗期间新分享进来的文件继续保留
+                    val sent = restoreUris.toSet()
+                    pendingUris.removeAll { it in sent }
                     updatePendingUi()
                 }
                 startSend(files, peers[which], restoreUris)
             }
             .setNegativeButton("取消", null)
-            .show()
+            .create()
+        dialog.setOnDismissListener {
+            chooserVisible = false
+            // 用户主动取消后不要在下次回到前台又自动弹出
+            if (!picked) autoPickerArmed = false
+        }
+        chooserVisible = true
+        dialog.show()
     }
 
     private fun resolveFile(uri: Uri): OutgoingFile? {
@@ -821,13 +863,17 @@ class MainActivity : Activity() {
                             com.macdrop.mobile.net.MobileLog.write("发送失败：${it.message}")
                             // 失败时把待发送的文件放回去，用户可以直接重试
                             if (restoreUris.isNotEmpty()) {
-                                pendingUris.addAll(0, restoreUris)
+                                val known = pendingUris.map { uri -> uri.toString() }.toHashSet()
+                                val restored = restoreUris.filter { known.add(it.toString()) }
+                                pendingUris.addAll(0, restored)
                                 updatePendingUi()
                             }
                             "发送失败：${it.message}"
                         }
                     )
                     refreshTransferUi()
+                    clearOutgoingCache()
+                    handler.post { maybeAutoPresent() }
                 }
             }
         )
