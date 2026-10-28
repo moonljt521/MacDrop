@@ -196,6 +196,11 @@ struct ContentView: View {
                         Text(model.sendText.isEmpty ? "发送中…" : model.sendText)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        if model.sendLargeFile {
+                            Text("大文件传输中，请保持 MoonDrop 在前台；锁屏或切走会中断。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     .padding(.vertical, 4)
                 }

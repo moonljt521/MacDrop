@@ -9,6 +9,11 @@ final class ShareViewController: UIViewController {
     private static let appGroup = "group.com.macdrop.mobile"
     private static let deviceIDKey = "com.macdrop.mobile.deviceID"
 
+    /// 分享扩展的运行时间只有几十秒（超时会被系统回收，连 TCP 一起断）。
+    /// 按 3 MB/s 左右的 Wi-Fi 速度留足余量，超过 60 MB 就不在扩展里直接传，
+    /// 存到待发送由主 App 来发（主 App 会保持屏幕常亮并申请后台时间）。
+    private static let directSendLimit: Int64 = 60 * 1024 * 1024
+
     private let titleLabel = UILabel()
     private let subtitleLabel = UILabel()
     private let devicesStack = UIStackView()
@@ -211,6 +216,14 @@ final class ShareViewController: UIViewController {
                 self.finish("没有可发送的文件", success: false)
                 return
             }
+            // 大文件交给主 App：扩展活不到传输结束，硬传只会传到一半被系统干掉
+            let totalSize = self.files.reduce(Int64(0)) { $0 + $1.size }
+            if totalSize > Self.directSendLimit {
+                let size = ByteCountFormatter.string(fromByteCount: totalSize, countStyle: .file)
+                self.saveToPending(notice: "共 \(size)，扩展撑不到传完就会被系统中断，"
+                    + "已存为待发送。请打开 MoonDrop 继续发送。")
+                return
+            }
             self.titleLabel.text = "正在查找设备…"
             self.subtitleLabel.text = "\(self.files.count) 个文件"
             self.beginDiscovery()
@@ -306,7 +319,7 @@ final class ShareViewController: UIViewController {
 
     // MARK: - 兜底
 
-    private func saveToPending() {
+    private func saveToPending(notice: String? = nil) {
         guard let staging = stagingDir else {
             finish("没有可保存的文件", success: false)
             return
@@ -334,7 +347,7 @@ final class ShareViewController: UIViewController {
         progressView.isHidden = true
         titleLabel.text = "已保存到 MoonDrop"
         subtitleLabel.text = "\(files.count) 个文件尚未发送"
-        statusLabel.text = "打开 MoonDrop 会直接弹出设备选择。"
+        statusLabel.text = notice ?? "打开 MoonDrop 会直接弹出设备选择。"
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             self.extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
         }

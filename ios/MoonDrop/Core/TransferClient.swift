@@ -44,7 +44,9 @@ final class TransferClient {
                              to peer: Peer,
                              progress: @escaping (Int64, Int64, String) -> Void) async throws {
         // 首选地址（局域网 IP）连不通时，依次尝试同一台设备的其它地址
-        let bases = ([peer.host] + peer.alternatives).map { "http://\($0):\(peer.port)" }
+        let bases = ([peer.host] + peer.alternatives).map {
+            "http://\(Self.formatHost($0)):\(peer.port)"
+        }
         let total = files.reduce(Int64(0)) { $0 + $1.size }
         let tracker = ProgressTracker()
         progress(0, total, files[0].url.lastPathComponent)
@@ -120,6 +122,11 @@ final class TransferClient {
 
     // MARK: - HTTP 辅助
 
+    /// IPv6 字面量拼进 URL 必须加方括号，否则 URL 非法（-1000）
+    private static func formatHost(_ host: String) -> String {
+        host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
+    }
+
     private static func chunkCount(_ size: Int64) -> Int {
         Int((size + Int64(chunkSize) - 1) / Int64(chunkSize))
     }
@@ -144,6 +151,9 @@ final class TransferClient {
                                  file: OutgoingFile,
                                  rootName: String?) async throws -> String {
         var lastError: Error = URLError(.badURL)
+        // 首选地址通常是可路由的 IPv4，它的错误更有诊断价值；
+        // 备选的 IPv6/AWDL 地址失败得早，别让它盖住真正原因
+        var firstError: Error?
         for round in 0..<2 {
             for base in bases {
                 do {
@@ -151,6 +161,7 @@ final class TransferClient {
                                            file: file, rootName: rootName)
                     return base
                 } catch {
+                    if firstError == nil { firstError = error }
                     lastError = error
                 }
             }
@@ -158,7 +169,7 @@ final class TransferClient {
                 try? await Task.sleep(nanoseconds: 400_000_000)
             }
         }
-        let reason = lastError.localizedDescription
+        let reason = (firstError ?? lastError).localizedDescription
         throw NSError(domain: "MoonDropMobile", code: 1, userInfo: [
             NSLocalizedDescriptionKey: "\(reason)（对方可能在后台或已离线，请在对方屏幕上打开 MoonDrop）"
         ])
@@ -188,10 +199,31 @@ final class TransferClient {
         }
     }
 
+    /// 发送一个分块。分块按 offset 随机写、可重复提交，所以单个分块失败重试是安全的；
+    /// Wi-Fi 抖一下不再直接把整次传输废掉。
     private static func postChunk(baseURL: String,
                                   transferID: String,
                                   offset: Int64,
                                   data: Data) async throws {
+        var lastError: Error = URLError(.badServerResponse)
+        for attempt in 0..<3 {
+            do {
+                try await postChunkOnce(baseURL: baseURL, transferID: transferID,
+                                        offset: offset, data: data)
+                return
+            } catch {
+                lastError = error
+                guard attempt < 2, !Task.isCancelled else { break }
+                try? await Task.sleep(nanoseconds: UInt64(400_000_000) * UInt64(attempt + 1))
+            }
+        }
+        throw lastError
+    }
+
+    private static func postChunkOnce(baseURL: String,
+                                      transferID: String,
+                                      offset: Int64,
+                                      data: Data) async throws {
         guard let url = URL(string: "\(baseURL)/macdrop/chunk?id=\(transferID)&offset=\(offset)") else {
             throw URLError(.badURL)
         }

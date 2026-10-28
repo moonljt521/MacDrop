@@ -22,6 +22,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var sending = false
     @Published private(set) var sendProgress: Double = 0
     @Published private(set) var sendText = ""
+    @Published private(set) var sendLargeFile = false
 
     @Published private(set) var receiving = false
     @Published private(set) var receiveProgress: Double = 0
@@ -38,6 +39,8 @@ final class AppModel: ObservableObject {
     private var manual: [Peer] = []
     private var started = false
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    /// 发送期间单独申请的后台时间（跟接收分开放，互不影响）
+    private var sendBackgroundTask: UIBackgroundTaskIdentifier = .invalid
 
     // 从其他 App「用 MoonDrop 打开」进来的文件
     private var pendingURLs: [URL] = []
@@ -436,11 +439,18 @@ final class AppModel: ObservableObject {
             return
         }
 
+        let totalBytes = files.reduce(Int64(0)) { $0 + $1.size }
         sending = true
         sendProgress = 0
         sendText = "准备发送…"
+        sendLargeFile = totalBytes > 100 * 1024 * 1024
         resultText = ""
         resultIsError = false
+
+        // 大文件要跑几十秒到几分钟：这期间别让屏幕自动锁屏，
+        // 也争取一点后台时间，避免用户切一下 App 回来发现传输已经断了
+        UIApplication.shared.isIdleTimerDisabled = true
+        beginSendBackgroundTask()
 
         client.send(files: files, to: peer, progress: { [weak self] sent, total, name in
             Task { @MainActor in
@@ -455,8 +465,11 @@ final class AppModel: ObservableObject {
                 url.stopAccessingSecurityScopedResource()
             }
             Task { @MainActor in
+                UIApplication.shared.isIdleTimerDisabled = false
                 guard let self else { return }
+                self.endSendBackgroundTask()
                 self.sending = false
+                self.sendLargeFile = false
                 switch result {
                 case .success:
                     self.sendProgress = 1
@@ -508,6 +521,19 @@ final class AppModel: ObservableObject {
         guard backgroundTask != .invalid else { return }
         UIApplication.shared.endBackgroundTask(backgroundTask)
         backgroundTask = .invalid
+    }
+
+    private func beginSendBackgroundTask() {
+        guard sendBackgroundTask == .invalid else { return }
+        sendBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "MoonDropSend") { [weak self] in
+            Task { @MainActor in self?.endSendBackgroundTask() }
+        }
+    }
+
+    private func endSendBackgroundTask() {
+        guard sendBackgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(sendBackgroundTask)
+        sendBackgroundTask = .invalid
     }
 
     // MARK: - 已接收文件

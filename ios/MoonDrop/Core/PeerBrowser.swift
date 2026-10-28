@@ -229,8 +229,17 @@ extension PeerBrowser: NetServiceDelegate {
             remove(serviceName: sender.name)
             return
         }
+        var alternatives = candidates.dropFirst().map { $0.ip }
+        // 数字 IP 可能因 DHCP 变更过期；把 Bonjour 主机名也作为兜底地址
+        if let hostName = sender.hostName {
+            let trimmed = hostName.hasSuffix(".") ? String(hostName.dropLast()) : hostName
+            if !trimmed.isEmpty, trimmed.lowercased() != "local",
+               !alternatives.contains(trimmed), trimmed != best.ip {
+                alternatives.append(trimmed)
+            }
+        }
         upsert(Peer(name: sender.name, host: best.ip, port: UInt16(clamping: sender.port),
-                    alternatives: candidates.dropFirst().map { $0.ip }),
+                    alternatives: alternatives),
                serviceName: sender.name)
     }
 
