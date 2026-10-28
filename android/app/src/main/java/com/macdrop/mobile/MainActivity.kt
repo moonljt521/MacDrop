@@ -14,6 +14,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.provider.Settings
@@ -48,6 +49,7 @@ class MainActivity : Activity() {
 
     private lateinit var localName: TextView
     private lateinit var localPort: TextView
+    private lateinit var batteryHint: TextView
     private lateinit var peersContainer: LinearLayout
     private lateinit var sendHint: TextView
     private lateinit var sendFileButton: Button
@@ -126,6 +128,7 @@ class MainActivity : Activity() {
             }
         }
         maybeAutoPresent()
+        updateBatteryHint()
     }
 
     override fun onPause() {
@@ -179,8 +182,15 @@ class MainActivity : Activity() {
             setTextColor(SECONDARY)
             setPadding(0, dp(3), 0, 0)
         }
+        batteryHint = TextView(this).apply {
+            textSize = 12f
+            setTextColor(ACCENT)
+            setPadding(0, dp(6), 0, 0)
+            setOnClickListener { requestIgnoreBatteryOptimizations() }
+        }
         localCard.addView(localName)
         localCard.addView(localPort)
+        localCard.addView(batteryHint)
         root.addView(localCard, cardParams())
 
         root.addView(sectionTitle("附近的设备"))
@@ -447,6 +457,41 @@ class MainActivity : Activity() {
         try {
             java.io.File(cacheDir, "outgoing").deleteRecursively()
         } catch (_: Exception) {
+        }
+    }
+
+    /// 锁屏后收不到文件，通常是系统的电池优化把前台服务冻结了。
+    private fun updateBatteryHint() {
+        if (!::batteryHint.isInitialized) return
+        val ignoring = isIgnoringBatteryOptimizations()
+        batteryHint.text = if (ignoring) {
+            "后台接收：已允许（电池优化已关闭）"
+        } else {
+            "后台接收：点此关闭电池优化，锁屏后也能收到文件"
+        }
+        batteryHint.setTextColor(if (ignoring) SECONDARY else ACCENT)
+        batteryHint.isClickable = !ignoring
+    }
+
+    private fun isIgnoringBatteryOptimizations(): Boolean =
+        getSystemService(PowerManager::class.java)
+            ?.isIgnoringBatteryOptimizations(packageName) == true
+
+    private fun requestIgnoreBatteryOptimizations() {
+        if (isIgnoringBatteryOptimizations()) {
+            toast("已允许后台接收")
+            return
+        }
+        val packageUri = Uri.parse("package:$packageName")
+        try {
+            startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, packageUri))
+            return
+        } catch (_: ActivityNotFoundException) {
+        }
+        try {
+            startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        } catch (_: ActivityNotFoundException) {
+            toast("请在系统设置中关闭 MoonDrop 的电池优化")
         }
     }
 
