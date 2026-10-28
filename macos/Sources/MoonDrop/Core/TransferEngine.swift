@@ -121,7 +121,9 @@ final class TransferEngine {
               completion: @escaping (Result<Void, Error>) -> Void) {
 
         // 首选地址（局域网 IP）连不通时，依次尝试同一台设备的其它地址
-        let bases = ([peer.host] + peer.alternatives).map { "http://\($0):\(peer.port)" }
+        let bases = ([peer.host] + peer.alternatives).map {
+            "http://\(Self.formatHost($0)):\(peer.port)"
+        }
         let total = items.reduce(Int64(0)) { $0 + $1.size }
         let tracker = SendProgressTracker()
 
@@ -358,13 +360,16 @@ final class TransferEngine {
                           total: Int64, rootName: String?,
                           completion: @escaping (Result<String, Error>) -> Void) {
         let lastError = ErrorBox()
+        // 首选地址（通常是可路由的 IPv4）的错误更有诊断价值；
+        // 备选的 IPv6/AWDL 地址失败得早，别让它盖住真正原因
+        let firstError = ErrorBox()
 
         func attempt(_ index: Int, round: Int) {
             guard index < bases.count else {
                 if round == 0 {
                     DispatchQueue.global().asyncAfter(deadline: .now() + 0.4) { attempt(0, round: 1) }
                 } else {
-                    let reason = (lastError.value ?? URLError(.badURL)).localizedDescription
+                    let reason = (firstError.value ?? lastError.value ?? URLError(.badURL)).localizedDescription
                     completion(.failure(NSError(domain: "MoonDrop", code: 1, userInfo: [
                         NSLocalizedDescriptionKey: "\(reason)（对方可能在后台或已离线，请在对方屏幕上打开 MoonDrop）"
                     ])))
@@ -378,12 +383,19 @@ final class TransferEngine {
                 case .success:
                     completion(.success(base))
                 case .failure(let error):
+                    NSLog("[MoonDrop] 连接失败 \(base): \(error)")
+                    if firstError.value == nil { firstError.set(error) }
                     lastError.set(error)
                     attempt(index + 1, round: round)
                 }
             }
         }
         attempt(0, round: 0)
+    }
+
+    /// IPv6 字面量拼进 URL 必须加方括号，否则 URL 非法（-1000）
+    private static func formatHost(_ host: String) -> String {
+        host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
     }
 
     private func announceOnce(transferID: String, fileName: String, relPath: String,

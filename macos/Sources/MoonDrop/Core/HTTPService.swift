@@ -54,6 +54,12 @@ final class HTTPService {
     /// 单个分块 2 MB，留出余量；超过就当成异常请求拒掉
     private static let maxBodyBytes = 32 * 1024 * 1024
 
+    /// 等请求体时允许的最长静默时间。发送端进程被系统杀掉后 TCP 常常不会
+    /// 立刻报错，连接就这么半开着；没有这个超时，连接会一直挂着不释放。
+    private static let bodyIdleTimeout: TimeInterval = 20
+    /// keep-alive 空闲连接（等下一个请求头）的回收时间
+    private static let keepAliveTimeout: TimeInterval = 60
+
     init(port: UInt16, handler: @escaping Handler) {
         self.port = port
         self.handler = handler
@@ -94,10 +100,28 @@ final class HTTPService {
         var state = 0 // 0=读头 1=读体 2=已应答
         var closing = false
         var stopped = false
+        var idleWork: DispatchWorkItem?
+
+        /// 每次收数据前重新计时；超时没动静就断开连接。
+        /// 断开后 receive 的回调里会走到中断上报，不用在这里做清理。
+        func armIdleTimeout() {
+            idleWork?.cancel()
+            let timeout = state == 1 ? HTTPService.bodyIdleTimeout
+                                     : HTTPService.keepAliveTimeout
+            let work = DispatchWorkItem { conn.cancel() }
+            idleWork = work
+            queue.asyncAfter(deadline: .now() + timeout, execute: work)
+        }
+
+        func stopIdleTimeout() {
+            idleWork?.cancel()
+            idleWork = nil
+        }
 
         // keep-alive：应答后不关闭连接，继续处理同一连接上的下一个请求。
         // 之前每块都新建连接，握手 + 慢启动把吞吐压得很低。
         func respond(_ response: Response) {
+            stopIdleTimeout()
             send(conn, response, keepAlive: !closing) {
                 if closing {
                     conn.cancel()
@@ -114,7 +138,10 @@ final class HTTPService {
         func failAndClose(_ msg: String) {
             closing = true
             stopped = true
-            send(conn, .failure(msg), keepAlive: false) { conn.cancel() }
+            stopIdleTimeout()
+            send(conn, .failure(msg), keepAlive: false) {
+                conn.cancel()
+            }
         }
 
         func processBuffer() {
@@ -149,6 +176,8 @@ final class HTTPService {
         }
 
         func receiveNext() {
+            guard !stopped else { return }
+            armIdleTimeout()
             conn.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) {
                 data, _, isComplete, error in
                 if let data, !data.isEmpty {
@@ -167,6 +196,9 @@ final class HTTPService {
                     }
                     receiveNext()
                 } else if isComplete || error != nil {
+                    // 单条分块连接断掉只作废这条连接：发送端会按 offset 重试，
+                    // 传输级断流交给上层看门狗按「多久没有新分块」判断
+                    stopIdleTimeout()
                     conn.cancel()
                 } else {
                     receiveNext()

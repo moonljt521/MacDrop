@@ -58,18 +58,29 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-echo "==> [3/5] ad-hoc 签名（封进 bundle，资源一并绑定）"
-# 用 "-" 作 identity 做本地 ad-hoc 签名，能过 Gatekeeper 的完整性校验
-codesign --force --sign - --timestamp=none "$APP_DIR" 2>&1 | sed 's/^/    /'
-# 二进制单独再签一次，确保 Mach-O 自身也有完整签名
-codesign --force --sign - --timestamp=none "$APP_DIR/Contents/MacOS/$APP_NAME" 2>&1 | sed 's/^/    /'
+echo "==> [3/5] 正式签名（稳定身份，避免重装后丢失本地网络权限）"
+SIGN_IDENTITY="${MACDROP_SIGN_IDENTITY:-}"
+if [ -z "$SIGN_IDENTITY" ]; then
+    # 优先用本机 Apple Development 证书：签名身份稳定，TCC/本地网络授权不会每次重装被重置
+    SIGN_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
+        | sed -n 's/.*"\(Apple Development:.*\)"/\1/p' | head -1)
+fi
+if [ -n "$SIGN_IDENTITY" ]; then
+    echo "    使用身份：$SIGN_IDENTITY"
+    codesign --force --options runtime --timestamp=none \
+        --sign "$SIGN_IDENTITY" "$APP_DIR" 2>&1 | sed 's/^/    /'
+else
+    echo "    !! 没有可用的 Apple Development 证书，退回 ad-hoc 签名"
+    echo "    !! ad-hoc 每次重装都可能重置 macOS 本地网络权限（发送会报 offline）"
+    codesign --force --sign - --timestamp=none "$APP_DIR" 2>&1 | sed 's/^/    /'
+fi
 
 echo "==> [4/5] 清除隔离属性并校验"
 xattr -cr "$APP_DIR" 2>/dev/null || true
 
 echo
 echo "--- 签名信息 ---"
-codesign -dv "$APP_DIR" 2>&1 | grep -E "Identifier|Signature|Sealed|TeamIdentifier" | sed 's/^/    /'
+codesign -dv "$APP_DIR" 2>&1 | grep -E "Identifier|Authority|Signature|Sealed|TeamIdentifier" | sed 's/^/    /'
 echo "--- 完整性校验 ---"
 if codesign --verify --deep --strict "$APP_DIR" 2>&1 | sed 's/^/    /'; then
     echo "    ✓ 校验通过"
