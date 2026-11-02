@@ -77,6 +77,19 @@ final class Config {
 
     var port: UInt16 { current.port }
 
+    /// 装机生成的稳定标识，写进 Bonjour TXT，用于排查「谁在广播」。
+    /// 多实例测试时用 MACDROP_ID 区分，否则同一台机器上的两个实例会共用一个 id。
+    var deviceID: String {
+        if let env = ProcessInfo.processInfo.environment["MACDROP_ID"], !env.isEmpty {
+            return env
+        }
+        let key = "com.macdrop.deviceID"
+        if let saved = defaults.string(forKey: key) { return saved }
+        let generated = UUID().uuidString
+        defaults.set(generated, forKey: key)
+        return generated
+    }
+
     var downloadDir: String { current.downloadDir }
 
     var downloadURL: URL {

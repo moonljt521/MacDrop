@@ -1,6 +1,7 @@
 package com.macdrop.mobile.net
 
 import com.macdrop.mobile.store.MediaStoreStore
+import com.macdrop.mobile.store.ReceivedEntry
 import org.json.JSONObject
 import java.io.File
 import java.io.RandomAccessFile
@@ -12,7 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class ReceiverServer(
     private val store: MediaStoreStore,
-    private val deviceName: String
+    var deviceName: String
 ) {
 
     private data class Entry(
@@ -28,7 +29,7 @@ class ReceiverServer(
     private val lastPercent = AtomicInteger(-1)
 
     var onProgress: ((Double, String) -> Unit)? = null
-    var onFinished: ((String) -> Unit)? = null
+    var onFinished: ((ReceivedEntry) -> Unit)? = null
 
     var port: Int = 0
         private set
@@ -127,7 +128,7 @@ class ReceiverServer(
                         } else {
                             val saved = store.save(entry.file, entry.name, entry.root, entry.path)
                             entry.file.delete()
-                            onFinished?.invoke(saved.name)
+                            onFinished?.invoke(saved)
                             val body = JSONObject()
                                 .put("ok", true)
                                 .put("path", saved.relativePath + saved.name)

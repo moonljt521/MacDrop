@@ -19,6 +19,31 @@ data class ReceivedEntry(
     val relativePath: String
 )
 
+/** 相册保存的开关与判定，接收服务和界面共用同一份偏好 */
+object GallerySettings {
+
+    private const val PREFS = "macdrop"
+    private const val KEY_AUTO = "auto_save_gallery"
+
+    fun isEnabled(context: Context): Boolean =
+        context.applicationContext
+            .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_AUTO, true)
+
+    fun setEnabled(context: Context, enabled: Boolean) {
+        context.applicationContext
+            .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_AUTO, enabled).apply()
+    }
+
+    fun isMedia(name: String): Boolean {
+        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(
+            name.substringAfterLast('.', "").lowercase()
+        ) ?: return false
+        return mime.startsWith("image/") || mime.startsWith("video/")
+    }
+}
+
 /**
  * 接收文件落到系统「下载」目录，用户可在文件管理器/下载中直接看到。
  * 暂存文件放在应用 cacheDir，校验完成后再写入 MediaStore。
@@ -82,8 +107,50 @@ class MediaStoreStore(context: Context) {
         }
     }
 
-    fun listReceived(): List<ReceivedEntry> {
-        val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+    /**
+     * 把已收到的图片/视频再复制一份到系统相册目录（Pictures/MoonDrop、Movies/MoonDrop）。
+     * 「下载」里的原件不动。
+     */
+    fun saveToGallery(entry: ReceivedEntry): Uri {
+        val mime = mimeType(entry.name)
+        val collection = when {
+            mime.startsWith("image/") ->
+                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            mime.startsWith("video/") ->
+                MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            else -> throw IOException("只有图片和视频能存入相册")
+        }
+        val directory = if (mime.startsWith("image/")) {
+            "${Environment.DIRECTORY_PICTURES}/MoonDrop"
+        } else {
+            "${Environment.DIRECTORY_MOVIES}/MoonDrop"
+        }
+
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, entry.name)
+            put(MediaStore.MediaColumns.MIME_TYPE, mime)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, directory)
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(collection, values)
+            ?: throw IOException("无法在相册目录创建文件")
+        try {
+            val source = resolver.openInputStream(entry.uri)
+                ?: throw IOException("无法读取已收到的文件")
+            val sink = resolver.openOutputStream(uri)
+                ?: throw IOException("无法写入相册目录")
+            source.use { input -> sink.use { output -> input.copyTo(output) } }
+            resolver.update(uri, ContentValues().apply {
+                put(MediaStore.MediaColumns.IS_PENDING, 0)
+            }, null, null)
+            return uri
+        } catch (error: Exception) {
+            resolver.delete(uri, null, null)
+            throw error
+        }
+    }
+
+    fun listReceived(): List<ReceivedEntry> {        val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         val projection = arrayOf(
             MediaStore.MediaColumns._ID,
             MediaStore.MediaColumns.DISPLAY_NAME,

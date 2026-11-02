@@ -14,16 +14,26 @@ import android.os.IBinder
 import com.macdrop.mobile.net.MobileLog
 import com.macdrop.mobile.net.ReceiverRuntime
 import com.macdrop.mobile.net.ReceiverServer
+import com.macdrop.mobile.store.GallerySettings
 import com.macdrop.mobile.store.MediaStoreStore
+import kotlin.concurrent.thread
 
 /**
  * 前台服务：应用切到后台/锁屏后仍能继续接收文件。
+ *
+ * 广播（NSD 注册）也放在这里：系统杀掉 Activity 不影响它。
+ * 注册失败会被重试，否则「本机在监听、别人却看不到」会一直存在。
  */
 class ReceiverService : Service() {
 
     private var server: ReceiverServer? = null
     private var nsd: NsdManager? = null
     private var registrationListener: NsdManager.RegistrationListener? = null
+    private var registerAttempts = 0
+    private var sameNameFailures = 0
+    private var baseName = ""
+    private var instanceSuffix = 0
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     override fun onCreate() {
         super.onCreate()
@@ -43,19 +53,30 @@ class ReceiverService : Service() {
         )
 
         val store = MediaStoreStore(this)
-        val receiver = ReceiverServer(store, DeviceIdentity.name())
+        val receiver = ReceiverServer(store, DeviceIdentity.name(this))
         receiver.onProgress = { fraction, name ->
             ReceiverRuntime.receiving = true
             ReceiverRuntime.progress = fraction
             ReceiverRuntime.statusText = "接收中 ${(fraction * 100).toInt()}% · $name"
             ReceiverRuntime.notifyChanged()
         }
-        receiver.onFinished = { name ->
+        receiver.onFinished = { entry ->
             ReceiverRuntime.receiving = false
             ReceiverRuntime.progress = 1.0
             ReceiverRuntime.statusText = ""
-            ReceiverRuntime.lastResult = "已接收：$name"
+            ReceiverRuntime.lastResult = "已接收：${entry.name}"
             ReceiverRuntime.notifyChanged()
+            if (GallerySettings.isEnabled(this) && GallerySettings.isMedia(entry.name)) {
+                thread(name = "macdrop-gallery") {
+                    val saved = runCatching { store.saveToGallery(entry) }.getOrNull()
+                    ReceiverRuntime.lastResult = if (saved != null) {
+                        "已接收并存入相册：${entry.name}"
+                    } else {
+                        "已接收：${entry.name}（存入相册失败）"
+                    }
+                    ReceiverRuntime.notifyChanged()
+                }
+            }
         }
 
         val actualPort = receiver.start(PREFERRED_PORT)
@@ -68,11 +89,19 @@ class ReceiverService : Service() {
         advertise(actualPort)
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 改名后 Activity 会发这个：旧的注册必须先撤掉，再按新名字重新注册
+        if (intent?.action == ACTION_READVERTISE) {
+            server?.deviceName = DeviceIdentity.name(this)
+            reregister()
+        }
+        return START_STICKY
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        mainHandler.removeCallbacksAndMessages(null)
         registrationListener?.let {
             try {
                 nsd?.unregisterService(it)
@@ -88,30 +117,84 @@ class ReceiverService : Service() {
     private fun advertise(port: Int) {
         val manager = getSystemService(Context.NSD_SERVICE) as NsdManager
         nsd = manager
+        val desired = DeviceIdentity.name(this)
+        // 只有用户真改名才清掉后缀；重连/重试要保留已经避过撞车的那个名字
+        if (desired != baseName) {
+            baseName = desired
+            instanceSuffix = 0
+        }
+        val instanceName = if (instanceSuffix == 0) baseName else "$baseName ($instanceSuffix)"
         val info = NsdServiceInfo().apply {
-            serviceName = DeviceIdentity.name()
-            serviceType = "_macdrop._tcp"
+            serviceName = instanceName
+            serviceType = SERVICE_TYPE
             this.port = port
             setAttribute("id", DeviceIdentity.id(this@ReceiverService))
         }
         val listener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
+                registerAttempts = 0
+                sameNameFailures = 0
+                ReceiverRuntime.advertising = true
+                ReceiverRuntime.notifyChanged()
                 MobileLog.write("广播成功：${serviceInfo.serviceName} :$port")
             }
 
             override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                ReceiverRuntime.advertising = false
+                ReceiverRuntime.notifyChanged()
                 MobileLog.write("广播失败：$errorCode")
+                // 同一个名字连失败两次，几乎一定是网段里已有同名实例（第二台会永远隐身）
+                sameNameFailures++
+                if (sameNameFailures >= 2) {
+                    instanceSuffix++
+                    sameNameFailures = 0
+                    MobileLog.write("广播名「$baseName」被占用，改用「$baseName ($instanceSuffix)」重试")
+                }
+                retryRegister(port)
             }
 
-            override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) {}
+            override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) {
+                registrationListener = null
+            }
 
-            override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {}
+            override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                MobileLog.write("撤销广播失败：$errorCode")
+            }
         }
         registrationListener = listener
         try {
             manager.registerService(info, NsdManager.PROTOCOL_DNS_SD, listener)
         } catch (error: Exception) {
             MobileLog.write("registerService 异常：$error")
+            ReceiverRuntime.advertising = false
+            retryRegister(port)
+        }
+    }
+
+    private fun retryRegister(port: Int) {
+        if (registerAttempts >= MAX_REGISTER_ATTEMPTS) return
+        registerAttempts++
+        val delay = REGISTER_BACKOFF_MS[(registerAttempts - 1).coerceAtMost(REGISTER_BACKOFF_MS.lastIndex)]
+        MobileLog.write("${delay}ms 后重新广播（第 $registerAttempts 次）")
+        mainHandler.postDelayed({
+            if (registrationListener == null) advertise(port) else reregister()
+        }, delay)
+    }
+
+    /** 撤掉旧注册，随后用当前名字与端口重新注册 */
+    private fun reregister() {
+        val listener = registrationListener
+        val port = ReceiverRuntime.port
+        if (listener != null) {
+            try {
+                nsd?.unregisterService(listener)
+            } catch (_: Exception) {
+            }
+            registrationListener = null
+        }
+        ReceiverRuntime.advertising = false
+        if (port > 0) {
+            mainHandler.postDelayed({ advertise(port) }, REREGISTER_DELAY_MS)
         }
     }
 
@@ -141,5 +224,11 @@ class ReceiverService : Service() {
         private const val CHANNEL_ID = "macdrop_receive"
         private const val NOTIFICATION_ID = 1
         private const val PREFERRED_PORT = 52345
+        private const val SERVICE_TYPE = "_macdrop._tcp"
+        private const val MAX_REGISTER_ATTEMPTS = 6
+        private const val REREGISTER_DELAY_MS = 700L
+        private val REGISTER_BACKOFF_MS = longArrayOf(2_000L, 5_000L, 10_000L, 20_000L, 30_000L, 60_000L)
+
+        const val ACTION_READVERTISE = "com.macdrop.mobile.action.READVERTISE"
     }
 }

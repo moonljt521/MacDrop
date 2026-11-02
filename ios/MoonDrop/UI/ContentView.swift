@@ -25,6 +25,8 @@ struct ContentView: View {
     @State private var importKind: ImportKind = .files
     @State private var showingImporter = false
     @State private var presented: Presentation?
+    @State private var showingRename = false
+    @State private var renameText = ""
 
     var body: some View {
         NavigationStack {
@@ -56,6 +58,15 @@ struct ContentView: View {
                 case .folder(let url):
                     FolderBrowserView(url: url, store: model.store)
                 }
+            }
+            .alert("重命名本机", isPresented: $showingRename) {
+                TextField("例如 书房的那台 iPhone", text: $renameText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("保存") { model.rename(to: renameText) }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("其他设备的 MoonDrop 列表里显示这个名字，最长 24 个字符。")
             }
             .confirmationDialog("发送到哪台设备？",
                                 isPresented: $model.showingDevicePicker,
@@ -97,9 +108,33 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            Button {
+                renameText = model.deviceName
+                showingRename = true
+            } label: {
+                Label("重命名本机", systemImage: "pencil")
+            }
+
+            Toggle("收到图片/视频自动存入相册", isOn: $model.autoSaveToPhotos)
+
+            Text(connectSummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         } header: {
             Text("本机")
         }
+    }
+
+    /// 互相看不见时先看这一行：是没地址、还是广播没上线（本地网络权限被挡）
+    private var connectSummary: String {
+        let addresses = model.localAddresses
+        let addressPart = addresses.isEmpty ? "未取得局域网地址" : addresses.joined(separator: ", ")
+        guard model.listenPort > 0 else { return "\(addressPart) · 接收服务启动中" }
+        guard model.isAdvertiseLive else {
+            return "\(addressPart) · 广播未上线，请在「设置 → 隐私与安全性 → 本地网络」允许 MoonDrop"
+        }
+        return "\(addressPart) · 广播已上线"
     }
 
     private var peersSection: some View {
@@ -107,6 +142,9 @@ struct ContentView: View {
             if model.peers.isEmpty {
                 Text("未发现设备。确认对端已打开 MoonDrop，并处于同一 Wi-Fi。")
                     .font(.callout)
+                    .foregroundStyle(.secondary)
+                Text("iPhone 切到后台会停止广播，请让对端留在前台；仍看不见就用下面的扫描或手动填 IP。")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(model.peers) { peer in
@@ -123,6 +161,13 @@ struct ContentView: View {
                     }
                 }
             }
+
+            Button {
+                model.scanSubnet()
+            } label: {
+                Label(model.scanning ? "扫描局域网中…" : "扫描局域网设备", systemImage: "dot.radiowaves.left.and.right")
+            }
+            .disabled(model.scanning)
 
             Button {
                 model.manualError = nil
@@ -253,6 +298,16 @@ struct ContentView: View {
                         }
                         .buttonStyle(.plain)
 
+                        if PhotoSaver.isMedia(item.url) {
+                            Button {
+                                model.saveToPhotos(item)
+                            } label: {
+                                Image(systemName: "square.and.arrow.down")
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("存入相册")
+                        }
+
                         ShareLink(item: item.url) {
                             Image(systemName: "square.and.arrow.up")
                         }
@@ -274,7 +329,7 @@ struct ContentView: View {
 
     private var footerSection: some View {
         Section {
-            Text("接收的文件保存在「文件」App → 我的 iPhone → MoonDrop → Received。点击文件可直接预览，点击文件夹可进入浏览。接收过程中请保持 MoonDrop 在前台，锁屏或长时间切到后台可能中断传输。")
+            Text("接收的文件保存在「文件」App → 我的 iPhone → MoonDrop → Received；图片和视频可同时存入系统相册（见上方开关）。点击文件可直接预览，点击文件夹可进入浏览。接收过程中请保持 MoonDrop 在前台，锁屏或长时间切到后台可能中断传输。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

@@ -8,6 +8,9 @@ struct Peer: Identifiable, Hashable {
     var isManual: Bool = false
     /// 同一台设备的其它可用地址：首选地址连不通时依次尝试
     var alternatives: [String] = []
+
+    /// 去重用的地址键：设备改名后 Bonjour 实例名会变，按它才能认出是同一台
+    var endpoint: String { "\(host):\(port)" }
 }
 
 struct OutgoingFile {

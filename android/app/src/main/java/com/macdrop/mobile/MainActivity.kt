@@ -23,6 +23,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -34,7 +35,9 @@ import com.macdrop.mobile.net.NetUtil
 import com.macdrop.mobile.net.OutgoingFile
 import com.macdrop.mobile.net.Peer
 import com.macdrop.mobile.net.ReceiverRuntime
+import com.macdrop.mobile.net.SubnetScan
 import com.macdrop.mobile.net.TransferClient
+import com.macdrop.mobile.store.GallerySettings
 import com.macdrop.mobile.store.MediaStoreStore
 import com.macdrop.mobile.store.ReceivedEntry
 import org.json.JSONObject
@@ -49,8 +52,11 @@ class MainActivity : Activity() {
 
     private lateinit var localName: TextView
     private lateinit var localPort: TextView
+    private lateinit var netStatus: TextView
+    private lateinit var autoSaveGallery: CheckBox
     private lateinit var batteryHint: TextView
     private lateinit var peersContainer: LinearLayout
+    private lateinit var scanButton: Button
     private lateinit var sendHint: TextView
     private lateinit var sendFileButton: Button
     private lateinit var sendFolderButton: Button
@@ -66,10 +72,12 @@ class MainActivity : Activity() {
 
     private val discoveredPeers = mutableListOf<Peer>()
     private val manualPeers = mutableListOf<Peer>()
+    private val scannedPeers = mutableListOf<Peer>()
 
     private var discovery: Discovery? = null
     private var discoveryStarted = false
     private var screenVisible = false
+    private var scanning = false
 
     private var sending = false
     private var sendingProgress = 0.0
@@ -176,11 +184,35 @@ class MainActivity : Activity() {
             textSize = 17f
             setTextColor(TEXT)
             typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, 0, 0, dp(2))
         }
         localPort = TextView(this).apply {
             textSize = 13f
             setTextColor(SECONDARY)
             setPadding(0, dp(3), 0, 0)
+        }
+        netStatus = TextView(this).apply {
+            textSize = 12f
+            setTextColor(SECONDARY)
+            setPadding(0, dp(3), 0, 0)
+        }
+        val renameButton = Button(this).apply {
+            text = "重命名本机…"
+            textSize = 13f
+            setTextColor(ACCENT)
+            background = null
+            gravity = Gravity.START
+            setPadding(0, dp(6), 0, 0)
+            setOnClickListener { showRenameDialog() }
+        }
+        autoSaveGallery = CheckBox(this).apply {
+            text = "收到图片/视频自动存入相册"
+            textSize = 13f
+            setTextColor(SECONDARY)
+            isChecked = GallerySettings.isEnabled(this@MainActivity)
+            setOnCheckedChangeListener { _, checked ->
+                GallerySettings.setEnabled(this@MainActivity, checked)
+            }
         }
         batteryHint = TextView(this).apply {
             textSize = 12f
@@ -190,6 +222,9 @@ class MainActivity : Activity() {
         }
         localCard.addView(localName)
         localCard.addView(localPort)
+        localCard.addView(netStatus)
+        localCard.addView(renameButton)
+        localCard.addView(autoSaveGallery)
         localCard.addView(batteryHint)
         root.addView(localCard, cardParams())
 
@@ -197,13 +232,23 @@ class MainActivity : Activity() {
         val peersCard = card()
         peersContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         peersCard.addView(peersContainer)
+        scanButton = Button(this).apply {
+            text = "扫描局域网设备…"
+            textSize = 13f
+            setTextColor(ACCENT)
+            background = null
+            gravity = Gravity.START
+            setPadding(0, dp(8), 0, 0)
+            setOnClickListener { scanSubnet() }
+        }
+        peersCard.addView(scanButton)
         peersCard.addView(Button(this).apply {
             text = "手动添加设备…"
             textSize = 13f
             setTextColor(ACCENT)
             background = null
             gravity = Gravity.START
-            setPadding(0, dp(8), 0, 0)
+            setPadding(0, dp(2), 0, 0)
             setOnClickListener { showManualDialog() }
         })
         root.addView(peersCard, cardParams())
@@ -280,7 +325,8 @@ class MainActivity : Activity() {
         root.addView(receivedCard, cardParams())
 
         root.addView(TextView(this).apply {
-            text = "收到的文件保存在「下载 / 来自另一台Mac」。接收服务在前台通知中运行，切到后台也能继续接收。"
+            text = "收到的文件保存在「下载 / 来自另一台Mac」，图片和视频会另存一份到相册（可在「本机」里关闭）。" +
+                "接收服务在前台通知中运行，切到后台也能继续接收。"
             textSize = 12f
             setTextColor(SECONDARY)
             setPadding(0, dp(2), 0, 0)
@@ -317,8 +363,9 @@ class MainActivity : Activity() {
 
     private fun refreshRuntime() {
         val port = ReceiverRuntime.port
-        localName.text = DeviceIdentity.name()
+        localName.text = DeviceIdentity.name(this)
         localPort.text = if (port > 0) "监听端口 $port" else "接收服务启动中…"
+        netStatus.text = networkSummary(port)
         if (port > 0 && screenVisible) startDiscovery(port)
 
         if (ReceiverRuntime.lastResult.isNotEmpty() &&
@@ -328,6 +375,80 @@ class MainActivity : Activity() {
             refreshReceived()
         }
         refreshTransferUi()
+    }
+
+    /// 互相看不见时先看这一行：是本机没地址，还是广播没上线
+    private fun networkSummary(port: Int): String {
+        if (port <= 0) return "接收服务启动中…"
+        val addresses = SubnetScan.localIPv4s()
+        val addressPart = if (addresses.isEmpty()) {
+            "未取得局域网地址（未连 Wi-Fi？）"
+        } else {
+            addresses.joinToString(", ")
+        }
+        val advertisePart = if (ReceiverRuntime.advertising) {
+            "广播已上线"
+        } else {
+            "广播未上线，稍后自动重试；可改用扫描或手动填 IP"
+        }
+        return "$addressPart · $advertisePart"
+    }
+
+    private fun showRenameDialog() {
+        val input = EditText(this).apply {
+            hint = "例如 客厅的安卓机"
+            setText(DeviceIdentity.name(this@MainActivity))
+            setSelection(editableText.length)
+            inputType = InputType.TYPE_CLASS_TEXT
+            filters = arrayOf(android.text.InputFilter.LengthFilter(DeviceIdentity.MAX_NAME_LENGTH))
+        }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+            addView(input)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("重命名本机")
+            .setView(container)
+            .setPositiveButton("保存") { _, _ -> renameDevice(input.text.toString()) }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun renameDevice(raw: String) {
+        val saved = DeviceIdentity.setName(this, raw)
+        refreshRuntime()
+        // 广播名是 NSD 注册时定死的，必须让前台服务撤掉旧注册再发一次
+        try {
+            startService(Intent(this, ReceiverService::class.java)
+                .setAction(ReceiverService.ACTION_READVERTISE))
+        } catch (_: Exception) {
+        }
+        toast("已改名为「$saved」")
+    }
+
+    private fun scanSubnet() {
+        if (scanning) return
+        scanning = true
+        scanButton.isEnabled = false
+        scanButton.text = "扫描局域网中…"
+        SubnetScan.run { found ->
+            scanning = false
+            scanButton.isEnabled = true
+            scanButton.text = "扫描局域网设备…"
+            if (isFinishing || isDestroyed) return@run
+            for (hit in found) {
+                val peer = Peer(name = hit.name, host = hit.host, port = hit.port, manual = true)
+                scannedPeers.removeAll { it.endpoint == peer.endpoint }
+                scannedPeers.add(peer)
+            }
+            refreshPeers()
+            toast(if (found.isEmpty()) {
+                "没有扫到设备，网络可能开了客户端隔离"
+            } else {
+                "扫描到 ${found.size} 台设备"
+            })
+        }
     }
 
     private fun refreshTransferUi() {
@@ -363,7 +484,8 @@ class MainActivity : Activity() {
         peersContainer.removeAllViews()
         if (peers.isEmpty()) {
             peersContainer.addView(TextView(this).apply {
-                text = "未发现设备。确认对端已打开 MoonDrop，并处于同一 Wi-Fi。"
+                text = "未发现设备。确认对端已打开 MoonDrop，并处于同一 Wi-Fi；" +
+                    "仍看不见就用下面的「扫描局域网设备」或手动填 IP。"
                 textSize = 13f
                 setTextColor(SECONDARY)
                 setPadding(0, dp(4), 0, dp(4))
@@ -548,6 +670,7 @@ class MainActivity : Activity() {
 
     private fun mergedPeers(): List<Peer> {
         val map = LinkedHashMap<String, Peer>()
+        for (peer in scannedPeers) map[peer.endpoint] = peer
         for (peer in discoveredPeers) map[peer.endpoint] = peer
         for (peer in manualPeers) if (!map.containsKey(peer.endpoint)) map[peer.endpoint] = peer
         return map.values.sortedBy { it.name.lowercase(Locale.getDefault()) }
@@ -980,6 +1103,9 @@ class MainActivity : Activity() {
                 row.addView(actionLabel("安装", ACCENT) { installApk(entry) })
                 row.addView(actionLabel("分享", SECONDARY) { shareEntry(entry) })
             } else {
+                if (GallerySettings.isMedia(entry.name)) {
+                    row.addView(actionLabel("相册", ACCENT) { saveToGallery(entry) })
+                }
                 row.addView(actionLabel("分享", ACCENT) { shareEntry(entry) })
             }
 
@@ -1113,6 +1239,19 @@ class MainActivity : Activity() {
         thread(name = "macdrop-delete") {
             store.delete(entry)
             runOnUiThread { refreshReceived() }
+        }
+    }
+
+    /// 再复制一份到相册目录（Pictures/MoonDrop、Movies/MoonDrop），「下载」里的原件不动
+    private fun saveToGallery(entry: ReceivedEntry) {
+        thread(name = "macdrop-gallery") {
+            val result = runCatching { store.saveToGallery(entry) }
+            runOnUiThread {
+                toast(result.fold(
+                    onSuccess = { "已存入相册：${entry.name}" },
+                    onFailure = { "存入相册失败：${it.message ?: "未知错误"}" }
+                ))
+            }
         }
     }
 

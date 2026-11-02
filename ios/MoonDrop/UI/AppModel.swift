@@ -5,19 +5,27 @@ import UIKit
 final class AppModel: ObservableObject {
 
     private static let deviceIDKey = "com.macdrop.mobile.deviceID"
+    private static let deviceNameKey = "com.macdrop.mobile.deviceName"
+    private static let autoSaveKey = "com.macdrop.mobile.autoSavePhotos"
     private static let appGroupID = "group.com.macdrop.mobile"
 
-    let deviceName: String
+    @Published var deviceName: String
     let deviceID: String
     let store: FileStore
     let server: TransferServer
     let browser: PeerBrowser
 
     private let client = TransferClient()
+    private let defaults = UserDefaults.standard
 
     @Published private(set) var peers: [Peer] = []
     @Published private(set) var listenPort: UInt16 = 0
     @Published var showingDevicePicker = false
+    @Published private(set) var scanning = false
+    /// 收到的图片/视频自动写进系统相册
+    @Published var autoSaveToPhotos: Bool {
+        didSet { defaults.set(autoSaveToPhotos, forKey: Self.autoSaveKey) }
+    }
 
     @Published private(set) var sending = false
     @Published private(set) var sendProgress: Double = 0
@@ -73,10 +81,16 @@ final class AppModel: ObservableObject {
         sharedDefaults?.set(deviceID, forKey: Self.deviceIDKey)
 
         let rawName = UIDevice.current.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        deviceName = rawName.isEmpty ? "iPhone" : rawName
+        let savedName = defaults.string(forKey: Self.deviceNameKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let initialName = (savedName?.isEmpty == false) ? savedName! : (rawName.isEmpty ? "iPhone" : rawName)
+        deviceName = initialName
+        autoSaveToPhotos = defaults.object(forKey: Self.autoSaveKey) as? Bool ?? true
 
-        store = FileStore()
-        server = TransferServer(deviceName: deviceName, store: store)
+        // 属性包装器（@Published）在 self 完全初始化前不能读，这里一律用局部常量
+        let fileStore = FileStore()
+        store = fileStore
+        server = TransferServer(deviceName: initialName, store: fileStore)
         browser = PeerBrowser(ownID: deviceID)
 
         // 必须在任何 onOpenURL 取回文件之前清，避免误删刚取回的分享副本
@@ -118,7 +132,12 @@ final class AppModel: ObservableObject {
     }
 
     /// 回到前台时取回分享扩展暂存的文件。
+    /// 另外必须重新广播：系统把 App 挂起时会收回 Bonjour 发布，
+    /// 不重发就出现「本机一切正常、别的设备却再也看不到它」。
     func handleForeground() {
+        if started, listenPort > 0 {
+            browser.restart()
+        }
         if ingestSharedFiles() {
             schedulePendingPicker()
         }
@@ -304,6 +323,51 @@ final class AppModel: ObservableObject {
         } catch {
             manualError = "连不上 \(trimmedHost):\(port)，确认对端已运行且在同一局域网"
             return false
+        }
+    }
+
+    // MARK: - 本机名称
+
+    /// 自定义本机在别的设备列表里显示的名字
+    func rename(to rawName: String) {
+        let trimmed = String(rawName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(24))
+        guard !trimmed.isEmpty else { return }
+        guard trimmed != deviceName else { return }
+        deviceName = trimmed
+        defaults.set(trimmed, forKey: Self.deviceNameKey)
+        server.deviceName = trimmed
+        if listenPort > 0 {
+            browser.advertise(name: trimmed, port: listenPort)
+        }
+        MobileLog.write("本机改名为 \(trimmed)，已重新广播")
+        resultText = "已改名为「\(trimmed)」"
+        resultIsError = false
+    }
+
+    // MARK: - 连接自查
+
+    /// 本机局域网地址；为空说明还没连上 Wi-Fi
+    var localAddresses: [String] { SubnetScan.localIPv4s() }
+    var isAdvertiseLive: Bool { browser.isAdvertiseLive }
+
+    /// Bonjour 之外的兜底：组播被屏蔽的网络里靠这个把设备找回来。
+    func scanSubnet() {
+        guard !scanning else { return }
+        scanning = true
+        MobileLog.write("开始局域网扫描（默认端口 52345）")
+        SubnetScan.run { [weak self] found in
+            guard let self else { return }
+            self.scanning = false
+            for hit in found {
+                self.browser.addDirect(Peer(name: hit.name, host: hit.host,
+                                            port: hit.port, isManual: true))
+            }
+            self.manualError = nil
+            self.resultText = found.isEmpty
+                ? "扫描完成：没有发现设备，网络可能开了客户端隔离"
+                : "扫描到 \(found.count) 台设备"
+            self.resultIsError = found.isEmpty
+            MobileLog.write("扫描命中 \(found.count) 台")
         }
     }
 
@@ -508,6 +572,33 @@ final class AppModel: ObservableObject {
         resultIsError = false
         refreshReceived()
         endBackgroundTask()
+        if autoSaveToPhotos, PhotoSaver.isMedia(url) {
+            PhotoSaver.save(url) { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case .success:
+                    self.resultText = "已接收并存入相册：\(url.lastPathComponent)"
+                    self.resultIsError = false
+                case .failure(let error):
+                    self.resultText = "已接收，但存入相册失败：\(error.localizedDescription)"
+                    self.resultIsError = true
+                }
+            }
+        }
+    }
+
+    /// 手动把已接收的图片/视频存进相册
+    func saveToPhotos(_ item: ReceivedItem) {
+        PhotoSaver.save(item.url) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                self.resultText = "已存入相册：\(item.name)"
+                self.resultIsError = false
+            case .failure(let error):
+                self.reportError(error.localizedDescription)
+            }
+        }
     }
 
     private func beginBackgroundTaskIfNeeded() {

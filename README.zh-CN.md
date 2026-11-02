@@ -14,11 +14,14 @@
 
 ## 功能
 
-- Bonjour 自动发现，也可手动按 IP 添加设备
+- Bonjour 自动发现，并自带自愈（解析重试、广播重发、无回调看门狗）
+- 组播被屏蔽的网络里可用「扫描局域网设备」或手动填 IP 兜底
+- 三端都能自定义本机显示名（macOS：菜单栏 → 重命名本机；iOS / Android：本机 → 重命名本机）
 - 发送文件与文件夹，目录结构在接收端逐级还原
 - 任意平台互收，发送与接收两端都有进度
 - 支持从其他 App 打开或分享（iOS：用 MoonDrop 打开 / 分享；Android：系统分享面板）
 - 点击已接收文件可用系统查看器预览；iOS 上文件夹可在 App 内浏览
+- 收到的图片/视频自动存入系统相册（iOS 与 Android，可在本机卡片里关闭）
 - 交付前校验字节数，坏文件不会被当成完整文件
 
 ## 工作原理
@@ -32,7 +35,8 @@
 └────────────┘  POST /macdrop/finish  └────────────┘
 ```
 
-- **发现** — Bonjour `_macdrop._tcp`；只有设备真正离线时才会从列表移除。
+- **发现** — Bonjour `_macdrop._tcp`；解析失败会重试、回前台会重新广播、长时间没有回调会重启浏览。实例名在全网段必须唯一，重名时自动换成「名字 (2)」，否则后发布的那台会一直隐身。只有设备真正离线时才从列表移除。
+- **兜底** — 组播被屏蔽的网络里可用「扫描局域网设备」直接探测同网段 52345 端口，也可按 IP 手动添加。
 - **传输** — HTTP/1.1 + keep-alive；2 MiB 分块最多 3 路连接并发发送，每块确认后才继续。
 - **完整性** — 接收端比对已写字节数与声明大小，不一致直接拒收。
 - **交付** — macOS / iOS 校验通过后移动到目标位置；Android 发布待生效的 `MediaStore` 条目。
@@ -86,7 +90,11 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 1. 两台设备都打开 MoonDrop，连接同一网络。
 2. 发送：选择文件（或在 macOS 上拖到悬浮窗）；iOS 与 Android 会询问目标设备。
-3. 接收端提示已收到的文件——点击可预览，用「分享」可继续转发。
+3. 接收端提示已收到的文件——点击可预览，用「分享」可继续转发；图片/视频会另存一份到系统相册。
+
+想让列表更好认：macOS 菜单栏 → **重命名本机**，iOS / Android 在「本机」卡片里重命名。别的设备就显示这个名字。
+
+看不见设备时（都在同一 Wi-Fi、App 都开着）：先看「本机」卡片里的地址与广播状态，再用 **扫描局域网设备**；仍不行就手动填对端 IP。
 
 从其他 App 发送时：Android 用 **分享 → MoonDrop**，iOS 用 **用 MoonDrop 打开 / 分享 → MoonDrop**。文件先进入待发送区，选好目标后才会真正发送。
 
@@ -95,9 +103,11 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 | 内容 | 路径 |
 |---|---|
 | 配置 | `UserDefaults`（`com.macdrop.settings.v1`） |
+| 本机名 | macOS 同一份配置；iOS `com.macdrop.mobile.deviceName`；Android `macdrop/device_name`（未设置时用主机名 / 机型名） |
 | 暂存 | `~/Library/Application Support/MoonDrop/.staging`（macOS）、应用沙盒（移动端） |
 | 传输日志 | `~/Library/Application Support/MoonDrop/logs/transfer.log` |
 | 收到的文件 | `~/Downloads/来自另一台Mac`（macOS）、`Download/来自另一台Mac`（Android）、`文件 → 我的 iPhone → MoonDrop → Received`（iOS） |
+| 收到的图片/视频 | 系统相册（iOS）、`Pictures/MoonDrop` 与 `Movies/MoonDrop`（Android） |
 
 ## 测试
 
@@ -117,7 +127,8 @@ cd macos
 ## 已知边界
 
 - 传输不可续传，中断即丢弃，需要重发。
-- iOS 切到后台会暂停发现与监听；Android 靠前台服务维持。
+- iOS 切到后台会暂停发现与监听（回到前台会自动重新广播）；大文件请让接收端留在前台。Android 靠前台服务维持。
+- 扫描只能找到监听默认端口 52345 的设备；开了客户端隔离（AP isolation）的网络里单播也不通，任何局域网方案都无解。
 - 只校验字节数，不校验内容哈希。
 - Android 的已接收列表是平铺的，看不出目录层级。
 
@@ -135,6 +146,8 @@ tools/    图标生成脚本
 
 - Swift 6 改了多个 `NetService` API，老写法无法编译。
 - 校验 `sockaddr` 长度：IPv4 是 16 字节，不能用 `sockaddr_storage.size`。
-- Bonjour 也会发现本机自己的广播，按 TXT id 或本机地址过滤掉。
-- App 包整体 ad-hoc 签名、二进制单独再签；分发后执行 `xattr -cr`。
+- Bonjour 也会发现本机自己的广播，按「解析到的地址属于本机网卡 + 端口等于自己的监听端口」过滤，不能按显示名过滤。
+- 实例名撞车时第二台的发布会直接失败（`didNotPublish`，-72001）并永远不被发现，必须退避重试并加「 (2)」后缀；`macos/test-discovery.sh` 验证 5 覆盖这一条。
+- iOS 挂起时会收回已发布的 Bonjour 记录，回到前台必须重新广播。
+- macOS 用稳定的 Apple Development 身份签名：ad-hoc 每次重装都会重置「本地网络」权限，届时设备列表正常但发送报 `NSURLError -1009`。
 - 分发 zip 而非 `.app` 目录，避免 AppleDouble 文件破坏签名。

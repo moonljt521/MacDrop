@@ -16,8 +16,10 @@
 		7CC560789C6D0A522F9C4AAB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F239E0557DE8A4BF65CFE1D7 /* Assets.xcassets */; };
 		831A75CEA716171189B5C140 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28AD674F82A45E9BB2B18A6D /* ShareViewController.swift */; };
 		8E8C7E6F9EEDC290ED91FFC4 /* HTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9BD9983767689966A48E4FD /* HTTPServer.swift */; };
+		AC4AA8B2C14DC897027332A9 /* PhotoSaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24C8D5FE0AC00C8D165D35FE /* PhotoSaver.swift */; };
 		AE636B7C62E91FA331B49EF4 /* MoonDropShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 8D10744A752E1A33A4D45E40 /* MoonDropShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C87DA4DCC7C2F571B967BAEF /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70004AC12CE265A4BC2BD7DB /* AppModel.swift */; };
+		CC5DA6B752399997C4008FBB /* SubnetScan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A380154261EC3B3E293DAB9B /* SubnetScan.swift */; };
 		D2584128A63C42A24E86A886 /* FileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7455CEAE9F7D5D1E9DE28DAC /* FileStore.swift */; };
 		D4A279E41A3E95A3D2631733 /* PeerBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46D3DFAD7AF764DD61D5BE22 /* PeerBrowser.swift */; };
 		DE5815A3467BD28A605BE71E /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31BCD6740F3D4317281A2C41 /* Models.swift */; };
@@ -52,6 +54,7 @@
 /* Begin PBXFileReference section */
 		002D7E85A718C198C3301586 /* MoonDropShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MoonDropShare.entitlements; sourceTree = "<group>"; };
 		1F8E728517806DB841C006DA /* MoonDropApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoonDropApp.swift; sourceTree = "<group>"; };
+		24C8D5FE0AC00C8D165D35FE /* PhotoSaver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoSaver.swift; sourceTree = "<group>"; };
 		28AD674F82A45E9BB2B18A6D /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		31BCD6740F3D4317281A2C41 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		46D3DFAD7AF764DD61D5BE22 /* PeerBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerBrowser.swift; sourceTree = "<group>"; };
@@ -63,6 +66,7 @@
 		860981DB9FEFDADBAA740D7C /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		8D10744A752E1A33A4D45E40 /* MoonDropShare.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = MoonDropShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		9D13AD2CFEAADF9CC0AA4A90 /* TransferClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferClient.swift; sourceTree = "<group>"; };
+		A380154261EC3B3E293DAB9B /* SubnetScan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubnetScan.swift; sourceTree = "<group>"; };
 		D035017CE9D5633355C83D14 /* QuickLookPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickLookPreview.swift; sourceTree = "<group>"; };
 		F239E0557DE8A4BF65CFE1D7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F9BD9983767689966A48E4FD /* HTTPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPServer.swift; sourceTree = "<group>"; };
@@ -85,6 +89,8 @@
 				F9BD9983767689966A48E4FD /* HTTPServer.swift */,
 				31BCD6740F3D4317281A2C41 /* Models.swift */,
 				46D3DFAD7AF764DD61D5BE22 /* PeerBrowser.swift */,
+				24C8D5FE0AC00C8D165D35FE /* PhotoSaver.swift */,
+				A380154261EC3B3E293DAB9B /* SubnetScan.swift */,
 				9D13AD2CFEAADF9CC0AA4A90 /* TransferClient.swift */,
 				59E4503850C120000F88B8FA /* TransferServer.swift */,
 			);
@@ -244,7 +250,9 @@
 				DE5815A3467BD28A605BE71E /* Models.swift in Sources */,
 				369D9F25E3A90F9C9F0A6B5B /* MoonDropApp.swift in Sources */,
 				DE7C21C89B25BF411F88279B /* PeerBrowser.swift in Sources */,
+				AC4AA8B2C14DC897027332A9 /* PhotoSaver.swift in Sources */,
 				F28DD9C079457E46E30709C4 /* QuickLookPreview.swift in Sources */,
+				CC5DA6B752399997C4008FBB /* SubnetScan.swift in Sources */,
 				447E2FEF4746F495F7E12B95 /* TransferClient.swift in Sources */,
 				5EA62E69DC85947BDB44FE9A /* TransferServer.swift in Sources */,
 			);

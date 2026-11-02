@@ -11,12 +11,27 @@ final class TransferServer {
     }
 
     private let store: FileStore
-    private let deviceName: String
     private var http: HTTPServer?
     private var staging: [String: (url: URL, meta: Meta)] = [:]
     private let lock = NSLock()
     private var lastPercent = -1
     private var lastError: Error?
+    /// 改名后要跟着变：/macdrop/ping 用它回答「我是谁」。HTTP 线程读、主线程写，必须加锁
+    private let nameLock = NSLock()
+    private var storedName: String
+
+    var deviceName: String {
+        get {
+            nameLock.lock()
+            defer { nameLock.unlock() }
+            return storedName
+        }
+        set {
+            nameLock.lock()
+            storedName = newValue
+            nameLock.unlock()
+        }
+    }
 
     private(set) var port: UInt16 = 0
 
@@ -24,7 +39,7 @@ final class TransferServer {
     var onFinished: ((URL) -> Void)?
 
     init(deviceName: String, store: FileStore) {
-        self.deviceName = deviceName
+        self.storedName = deviceName
         self.store = store
     }
 

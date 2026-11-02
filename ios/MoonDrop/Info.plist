@@ -59,6 +59,8 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>MoonDrop 需要在局域网内发现其他 Mac / iPhone / Android，并直接传输文件。</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>MoonDrop 需要写入相册，才能把收到的照片和视频保存下来。</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIFileSharingEnabled</key>

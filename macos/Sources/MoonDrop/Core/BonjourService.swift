@@ -12,6 +12,9 @@ struct Peer: Identifiable, Equatable {
     /// 同一台设备的其它可用地址：首选地址连不通时依次尝试
     var alternatives: [String] = []
 
+    /// 去重用的地址键：设备改名后 Bonjour 实例名会变，按它才能认出是同一台
+    var endpoint: String { "\(host):\(port)" }
+
     static func == (a: Peer, b: Peer) -> Bool { a.id == b.id }
 }
 
@@ -25,38 +28,95 @@ final class BonjourService: NSObject {
     private var advertiser: NetService?
     private var browser: NetServiceBrowser?
     private var resolving: Set<NetService> = []
-    private var servicePeers: [String: String] = [:]   // service name -> peer id
+    private var servicePeers: [String: String] = [:]   // service name -> peer endpoint
     private var pendingRemovals: [String: DispatchWorkItem] = [:]
-    /// 自己广告出去的名字，用来过滤「自己发现自己」
+    /// 解析失败的服务 → 重试任务；mDNS 在拥挤的 Wi-Fi 上偶发超时，一次失败不能永久看不见
+    private var resolveRetries: [String: DispatchWorkItem] = [:]
+    private var resolveAttempts: [String: Int] = [:]
+    /// 自己广告出去的实例名（重名时会被加上后缀）
     private var ownName: String = ""
+    /// 用户想要显示的名字；实例名冲突时只在后面加 (2)、(3)…
+    private var baseName: String = ""
+    private var instanceSuffix = 0
+    private var publishFailures = 0
+    private var publishRetry: DispatchWorkItem?
     /// 自己广播用的端口，和主机名一起用于唯一识别本机
     private var ownPort: UInt16 = 0
+    /// 广播是否真的上线（didPublish 过）；没上线时看门狗会重发
+    private var published = false
+    /// 最近一次任何 Bonjour 回调的时间；太久没有回调说明浏览已经死掉
+    private var lastActivity = Date()
+    private var healthTimer: DispatchSourceTimer?
 
     private(set) var peers: [Peer] = []
     var onPeersChanged: (([Peer]) -> Void)?
+    /// 广播是否已确认上线（对端能不能看到我）
+    var isAdvertiseLive: Bool { published }
 
     private let lock = NSLock()
+
+    /// 浏览/广告静默多久后自愈
+    private static let staleAfter: TimeInterval = 40
+    private static let healthInterval: TimeInterval = 12
 
     // MARK: - 广告本机
 
     func advertise(name: String, port: UInt16) {
         stopAdvertising()
-        ownName = name
+        // 只有用户真的改名才从头开始；换端口/重新发布要保留已经避过撞车的后缀
+        if baseName != name {
+            baseName = name
+            instanceSuffix = 0
+        }
+        publishFailures = 0
         ownPort = port
+        publishInstance()
+        startHealthTimer()
+    }
+
+    /// 实例名在同一网段里必须唯一。重名时第二台会直接发布失败并永远不被发现
+    /// （实测 -72001），所以失败两次就换 "名字 (2)" 再发。
+    private func publishInstance() {
+        let instanceName = instanceSuffix == 0 ? baseName : "\(baseName) (\(instanceSuffix))"
+        ownName = instanceName
+        if let old = advertiser {
+            old.delegate = nil
+            old.stop()
+        }
         let svc = NetService(domain: BonjourService.domain,
                              type: BonjourService.serviceType,
-                             name: name,
-                             port: Int32(port))
+                             name: instanceName,
+                             port: Int32(ownPort))
         svc.delegate = self
-        svc.setTXTRecord(Data())
+        // TXT 带一个装机生成的稳定 id，方便对端识别与排查；不靠它过滤自己
+        svc.setTXTRecord(NetService.data(fromTXTRecord: [
+            "id": Data(Config.shared.deviceID.utf8)
+        ]))
+        published = false
         svc.publish()
         advertiser = svc
-        NSLog("[MoonDrop] Bonjour 广告启动: \(name)")
+        NSLog("[MoonDrop] Bonjour 广告启动: \(instanceName) (端口 \(ownPort))")
+    }
+
+    private func scheduleRepublish() {
+        publishRetry?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.publishRetry = nil
+            guard self.advertiser != nil, !self.published else { return }
+            self.publishInstance()
+        }
+        publishRetry = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
     }
 
     func stopAdvertising() {
+        publishRetry?.cancel()
+        publishRetry = nil
+        advertiser?.delegate = nil
         advertiser?.stop()
         advertiser = nil
+        published = false
     }
 
     // MARK: - 浏览对端
@@ -68,6 +128,7 @@ final class BonjourService: NSObject {
         b.searchForServices(ofType: BonjourService.serviceType,
                             inDomain: BonjourService.domain)
         browser = b
+        lastActivity = Date()
         NSLog("[MoonDrop] Bonjour 浏览启动")
     }
 
@@ -76,15 +137,51 @@ final class BonjourService: NSObject {
         browser = nil
     }
 
+    /// 广播静默失败 / 浏览线程被系统回收时，光靠回调等不到任何东西。
+    /// 这个看门狗只做两件幂等的事：没发布成功就重发，长时间没有回调就重启浏览。
+    private func startHealthTimer() {
+        guard healthTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(
+            queue: DispatchQueue(label: "com.macdrop.bonjour.health")
+        )
+        timer.schedule(deadline: .now() + Self.healthInterval, repeating: Self.healthInterval)
+        timer.setEventHandler { [weak self] in self?.checkHealth() }
+        timer.resume()
+        healthTimer = timer
+    }
+
+    private func checkHealth() {
+        // Bonjour 回调、广播、重试都在主线程，看门狗也切回主线程，避免多线程读写同一组状态
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if self.advertiser != nil, !self.published {
+                NSLog("[MoonDrop] Bonjour 广告未上线，重新发布")
+                self.scheduleRepublish()
+            }
+            if self.browser != nil, Date().timeIntervalSince(self.lastActivity) > Self.staleAfter {
+                NSLog("[MoonDrop] Bonjour 浏览超过 \(Int(Self.staleAfter)) 秒无回调，重启浏览")
+                self.browse()
+            }
+        }
+    }
+
+    private func touch() {
+        lastActivity = Date()
+    }
+
     // MARK: - 对端表
 
     private func upsert(_ peer: Peer, serviceName: String? = nil) {
         lock.lock()
         if let serviceName {
-            servicePeers[serviceName] = peer.id
+            // 同一台设备换了 IP（DHCP 续租/切网）：旧地址那条要撤掉，否则列表里出现两个它
+            if let previous = servicePeers[serviceName], previous != peer.endpoint {
+                peers.removeAll { $0.endpoint == previous }
+            }
+            servicePeers[serviceName] = peer.endpoint
         }
-        // 按地址去重：设备改名后 Bonjour 名字会变，按 id 会出现两条同一台设备
-        if let idx = peers.firstIndex(where: { $0.host == peer.host && $0.port == peer.port }) {
+        // 按地址去重：设备改名后 Bonjour 名字会变，按名字会出现两条同一台设备
+        if let idx = peers.firstIndex(where: { $0.endpoint == peer.endpoint }) {
             peers[idx] = peer
         } else {
             peers.append(peer)
@@ -94,12 +191,19 @@ final class BonjourService: NSObject {
         notify()
     }
 
+    /// 扫描 / 手动添加得到的对端
+    func addDirect(_ peer: Peer) {
+        upsert(peer)
+    }
+
     /// 只移除消失的那一台设备；不能因为一次 lost 事件清空整个列表。
     private func remove(serviceName: String) {
         lock.lock()
         pendingRemovals.removeValue(forKey: serviceName)
-        if let peerID = servicePeers.removeValue(forKey: serviceName) {
-            peers.removeAll { $0.id == peerID }
+        resolveRetries.removeValue(forKey: serviceName)?.cancel()
+        resolveAttempts.removeValue(forKey: serviceName)
+        if let endpoint = servicePeers.removeValue(forKey: serviceName) {
+            peers.removeAll { $0.endpoint == endpoint }
         } else {
             peers.removeAll { !$0.isManual && $0.name == serviceName }
         }
@@ -143,11 +247,19 @@ final class BonjourService: NSObject {
         }
         var req = URLRequest(url: url)
         req.timeoutInterval = 3
-        URLSession.shared.dataTask(with: req) { _, resp, _ in
+        URLSession.shared.dataTask(with: req) { data, resp, _ in
+            var peerName = name
+            if peerName.isEmpty || peerName == "手动对端" {
+                if let data,
+                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let reported = object["device"] as? String, !reported.isEmpty {
+                    peerName = reported
+                }
+            }
             let ok = (resp as? HTTPURLResponse)?.statusCode == 200
             if ok {
                 self.upsert(Peer(host: host, port: port,
-                                 name: name.isEmpty ? host : name,
+                                 name: peerName.isEmpty ? host : peerName,
                                  isManual: true))
             }
             DispatchQueue.main.async { completion(ok) }
@@ -159,16 +271,18 @@ extension BonjourService: NetServiceBrowserDelegate {
     func netServiceBrowser(_ browser: NetServiceBrowser,
                            didFind service: NetService,
                            moreComing: Bool) {
+        touch()
         // 过滤掉自己。注意：不能用显示名判断——两台机器可能都叫 "MacBook Pro"，
         // 会把对方误当成自己滤掉（实测踩过：Bonjour 会把重名的后者改名成 "MacBook Pro (2)"，
         // 但两边都叫这个名字，结果互相看不见）。
-        // 改用「本机主机名 + 端口」这一组唯一性更高的特征。
-        let localHost = ProcessInfo.processInfo.hostName
+        // 这里只允许「名字 + 端口 + 主机名」三者同时命中才早退，解析成功后还会再查一次本机地址。
+        let localHost = ProcessInfo.processInfo.hostName.lowercased()
         let serviceHost = (service.hostName ?? "").lowercased()
-        if service.name == ownName,
+        if !localHost.isEmpty,
+           service.name == ownName,
            Int32(ownPort) == service.port,
            !serviceHost.isEmpty,
-           serviceHost.contains(localHost.lowercased()) {
+           serviceHost.contains(localHost) {
             return
         }
         cancelPendingRemoval(serviceName: service.name)
@@ -181,6 +295,7 @@ extension BonjourService: NetServiceBrowserDelegate {
     func netServiceBrowser(_ browser: NetServiceBrowser,
                            didRemove service: NetService,
                            moreComing: Bool) {
+        touch()
         NSLog("[MoonDrop] 对端消失: \(service.name)")
         resolving.remove(service)
         scheduleRemoval(serviceName: service.name)
@@ -188,26 +303,49 @@ extension BonjourService: NetServiceBrowserDelegate {
 
     func netServiceBrowser(_ browser: NetServiceBrowser,
                            didNotSearch errorDict: [String: NSNumber]) {
-        NSLog("[MoonDrop] Bonjour 浏览失败: \(errorDict)")
+        // 常见于本地网络权限还没批下来：批完权限后浏览不会自己恢复，必须重启
+        NSLog("[MoonDrop] Bonjour 浏览失败: \(errorDict)，\(Int(Self.staleAfter)) 秒内自动重试")
+        lastActivity = .distantPast
     }
 }
 
 extension BonjourService: NetServiceDelegate {
     func netServiceDidPublish(_ sender: NetService) {
+        touch()
+        published = true
+        publishFailures = 0
         NSLog("[MoonDrop] Bonjour 广告已上线: \(sender.name) (端口 \(sender.port))")
     }
 
     /// 本地网络权限被拒时，注册可能既不成功也不报错；这里必须留痕，否则问题无从排查。
     func netService(_ sender: NetService, didNotPublish errorDict: [String: NSNumber]) {
+        touch()
+        published = false
+        publishFailures += 1
+        if publishFailures >= 2 {
+            // 连发两次都失败，几乎可以确定是实例名撞车
+            instanceSuffix += 1
+            publishFailures = 0
+            NSLog("[MoonDrop] 广播名「\(baseName)」被占用，改用「\(baseName) (\(instanceSuffix))」重试")
+        }
         NSLog("[MoonDrop] Bonjour 广告失败: \(errorDict)")
+        scheduleRepublish()
     }
 
     func netServiceDidResolveAddress(_ sender: NetService) {
+        touch()
         resolving.remove(sender)
+        resolveAttempts.removeValue(forKey: sender.name)
         cancelPendingRemoval(serviceName: sender.name)
         let candidates = BonjourService.candidates(from: sender.addresses ?? [])
         guard let best = candidates.first else {
             NSLog("[MoonDrop] 解析地址失败: \(sender.name)")
+            scheduleResolveRetry(sender)
+            return
+        }
+        // 解析出来的地址属于本机网卡且端口一致，就是自己（重名机器上比名字可靠）
+        if UInt16(clamping: sender.port) == ownPort,
+           BonjourService.localAddresses().contains(best.ip) {
             return
         }
         var alternatives = candidates.dropFirst().map { $0.ip }
@@ -229,11 +367,59 @@ extension BonjourService: NetServiceDelegate {
 
     func netService(_ sender: NetService,
                     didNotResolve errorDict: [String: NSNumber]) {
-        NSLog("[MoonDrop] 解析超时: \(sender.name)")
+        touch()
         resolving.remove(sender)
+        NSLog("[MoonDrop] 解析超时: \(sender.name) \(errorDict)")
+        scheduleResolveRetry(sender)
     }
 
     func netService(_ sender: NetService, didUpdateTXTRecord data: Data) {}
+
+    /// Wi-Fi 拥挤时一次解析超时很常见，放弃就等于这台设备从此不再出现在列表里。
+    /// 按 2/5/10 秒重试三轮，还在就当作真的不可达，等下一次 lost/didFind。
+    private func scheduleResolveRetry(_ service: NetService) {
+        let attempts = (resolveAttempts[service.name] ?? 0) + 1
+        resolveAttempts[service.name] = attempts
+        guard attempts <= 3 else {
+            resolveAttempts.removeValue(forKey: service.name)
+            return
+        }
+        let delay = [2.0, 5.0, 10.0][attempts - 1]
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.resolveRetries.removeValue(forKey: service.name)
+            guard !self.resolving.contains(service) else { return }
+            self.resolving.insert(service)
+            service.delegate = self
+            service.resolve(withTimeout: 5)
+        }
+        resolveRetries[service.name]?.cancel()
+        resolveRetries[service.name] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// 本机网卡上的地址，用来认出「自己广告的服务」
+    private static func localAddresses() -> Set<String> {
+        var result = Set<String>()
+        var pointer: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&pointer) == 0, let first = pointer else { return result }
+        defer { freeifaddrs(pointer) }
+        for entry in sequence(first: first, next: { $0.pointee.ifa_next }) {
+            guard let address = entry.pointee.ifa_addr else { continue }
+            let family = address.pointee.sa_family
+            guard family == sa_family_t(AF_INET) || family == sa_family_t(AF_INET6) else { continue }
+            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            guard getnameinfo(address, socklen_t(address.pointee.sa_len), &host,
+                              socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 else { continue }
+            let ip = String(cString: host)
+            if let zone = ip.firstIndex(of: "%") {
+                result.insert(String(ip[..<zone]))
+            } else {
+                result.insert(ip)
+            }
+        }
+        return result
+    }
 
     /// 从一组地址里挑一个可直接拼进 http://host:port 的。
     /// 必须 IPv4 优先：URL 里 IPv6 要加方括号才合法，且 NetService 返回的地址顺序不稳定，

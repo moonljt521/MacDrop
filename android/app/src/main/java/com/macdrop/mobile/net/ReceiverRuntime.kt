@@ -28,6 +28,10 @@ object ReceiverRuntime {
     @Volatile
     var lastResult: String = ""
 
+    /** NSD 注册是否成功；失败时本机在别人列表里不会出现 */
+    @Volatile
+    var advertising: Boolean = false
+
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
     private val main = Handler(Looper.getMainLooper())
 

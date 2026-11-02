@@ -19,6 +19,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     var onReceived: ((URL) -> Void)?
 
     private var peers: [Peer] = []
+    private var scanning = false
 
     // MARK: - 构建
 
@@ -80,14 +81,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(head)
         menu.addItem(.separator())
 
+        let diag = NSMenuItem(title: "  \(diagnosticsSummary())", action: nil, keyEquivalent: "")
+        diag.isEnabled = false
+        menu.addItem(diag)
+        menu.addItem(.separator())
+
         if peers.isEmpty {
             let none = NSMenuItem(title: "  未发现其他设备", action: nil, keyEquivalent: "")
             none.isEnabled = false
             menu.addItem(none)
-            menu.addItem(.separator())
-            let manual = NSMenuItem(title: "手动添加对端…", action: #selector(manualAdd), keyEquivalent: "")
-            manual.target = self
-            menu.addItem(manual)
         } else {
             let title = NSMenuItem(title: "对端设备：", action: nil, keyEquivalent: "")
             title.isEnabled = false
@@ -102,7 +104,21 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             }
         }
 
+        let scan = NSMenuItem(title: scanning ? "  扫描局域网中…" : "扫描局域网设备…",
+                              action: #selector(scanSubnet), keyEquivalent: "")
+        scan.target = self
+        scan.isEnabled = !scanning
+        menu.addItem(scan)
+
+        let manual = NSMenuItem(title: "手动添加对端…", action: #selector(manualAdd), keyEquivalent: "")
+        manual.target = self
+        menu.addItem(manual)
+
         menu.addItem(.separator())
+
+        let rename = NSMenuItem(title: "重命名本机…", action: #selector(renameDevice), keyEquivalent: "")
+        rename.target = self
+        menu.addItem(rename)
 
         // 通道 C：不依赖拖放
         let sendSel = NSMenuItem(title: "发送 Finder 选中项…",
@@ -181,6 +197,57 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     @objc private func togglePanel() { panel.toggle() }
 
+    /// 「都在线却互相看不见」时先看这一行：是本机没地址、没广播，还是广播没上线。
+    private func diagnosticsSummary() -> String {
+        let ips = SubnetScan.localIPv4s().map { $0.0 }
+        let address = ips.isEmpty ? "无局域网地址" : ips.joined(separator: ", ")
+        let advertise = bonjour.isAdvertiseLive ? "广播已上线"
+            : "广播未上线（检查「系统设置→隐私与安全性→本地网络」）"
+        return "\(address) · \(advertise)"
+    }
+
+    @objc private func renameDevice() {
+        let alert = NSAlert()
+        alert.messageText = "重命名本机"
+        alert.informativeText = "其他设备的 MoonDrop 列表里显示这个名字，最长 24 个字符。"
+        let field = NSTextField(string: cfg.deviceName)
+        field.placeholderString = "例如 书房的 Mac"
+        field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: "保存")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = String(field.stringValue
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .prefix(24))
+        guard !name.isEmpty, name != cfg.deviceName else { return }
+        cfg.update { $0.deviceName = name }
+        restartAdvertising()
+        Logger.write("本机改名为 \(name)，已重新广播")
+        panel.setDeviceName(name)
+    }
+
+    /// Bonjour 之外的兜底：屏蔽组播的网络里靠这个把设备找回来。
+    @objc private func scanSubnet() {
+        guard !scanning else { return }
+        scanning = true
+        rebuildMenu()
+        Logger.write("开始局域网扫描（默认端口 52345）")
+        SubnetScan.run { [weak self] found in
+            guard let self else { return }
+            self.scanning = false
+            for hit in found {
+                self.bonjour.addDirect(Peer(host: hit.host, port: hit.port,
+                                            name: hit.name, isManual: true))
+            }
+            Logger.write("局域网扫描命中 \(found.count) 台设备")
+            self.rebuildMenu()
+            self.panel.finishProgress(text: found.isEmpty
+                ? "扫描完成：未发现新设备（可能开了客户端隔离）"
+                : "扫描到 \(found.count) 台设备", isError: found.isEmpty)
+        }
+    }
+
     @objc private func openDownloadDir() {
         try? cfg.ensureDownloadDir()
         NSWorkspace.shared.open(cfg.downloadURL)
@@ -205,7 +272,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         guard !host.isEmpty else { return }
 
         let port = cfg.port
-        bonjour.probeManual(host: host, port: port, name: "手动对端") { ok in
+        bonjour.probeManual(host: host, port: port, name: "") { ok in
             if !ok {
                 NSAlert(error: NSError(domain: "MoonDrop", code: 2, userInfo: [
                     NSLocalizedDescriptionKey: "连不上 \(host):\(port)，确认对方 MoonDrop 在运行、防火墙已放行"
