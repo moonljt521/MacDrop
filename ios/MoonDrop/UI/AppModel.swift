@@ -1,4 +1,6 @@
 import Foundation
+import PhotosUI
+import SwiftUI
 import UIKit
 
 @MainActor
@@ -7,6 +9,7 @@ final class AppModel: ObservableObject {
     private static let deviceIDKey = "com.macdrop.mobile.deviceID"
     private static let deviceNameKey = "com.macdrop.mobile.deviceName"
     private static let autoSaveKey = "com.macdrop.mobile.autoSavePhotos"
+    private static let sentKey = "com.macdrop.mobile.sentRecords"
     private static let appGroupID = "group.com.macdrop.mobile"
 
     @Published var deviceName: String
@@ -37,6 +40,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var receiveText = ""
 
     @Published private(set) var received: [ReceivedItem] = []
+    @Published private(set) var sentRecords: [SentRecord] = []
     @Published private(set) var resultText = ""
     @Published private(set) var resultIsError = false
     @Published private(set) var pendingCount = 0
@@ -86,6 +90,7 @@ final class AppModel: ObservableObject {
         let initialName = (savedName?.isEmpty == false) ? savedName! : (rawName.isEmpty ? "iPhone" : rawName)
         deviceName = initialName
         autoSaveToPhotos = defaults.object(forKey: Self.autoSaveKey) as? Bool ?? true
+        sentRecords = AppModel.loadSentRecords(from: defaults)
 
         // 属性包装器（@Published）在 self 完全初始化前不能读，这里一律用局部常量
         let fileStore = FileStore()
@@ -540,6 +545,8 @@ final class AppModel: ObservableObject {
                     self.sendText = ""
                     self.resultText = "已发送 \(files.count) 个文件到 \(peer.name)"
                     self.resultIsError = false
+                    self.recordSent(names: files.map { $0.relativePath },
+                                    target: peer.name, size: totalBytes)
                 case .failure(let error):
                     self.sendText = ""
                     self.resultText = "发送失败：\(error.localizedDescription)"
@@ -638,5 +645,75 @@ final class AppModel: ObservableObject {
             try? FileManager.default.removeItem(at: received[index].url)
         }
         refreshReceived()
+    }
+
+    /// 清空已接收：删掉文件本身，只留空列表
+    func clearReceived() {
+        store.clearReceived()
+        refreshReceived()
+    }
+
+    // MARK: - 已发送记录
+
+    private static func loadSentRecords(from defaults: UserDefaults) -> [SentRecord] {
+        guard let data = defaults.data(forKey: sentKey),
+              let records = try? JSONDecoder().decode([SentRecord].self, from: data)
+        else { return [] }
+        return records
+    }
+
+    private func persistSentRecords() {
+        if let data = try? JSONEncoder().encode(sentRecords) {
+            defaults.set(data, forKey: Self.sentKey)
+        }
+    }
+
+    /// 记一笔发送成功的流水
+    func recordSent(names: [String], target: String, size: Int64) {
+        let record = SentRecord(names: names, target: target, size: size, date: Date())
+        sentRecords.insert(record, at: 0)
+        if sentRecords.count > 200 {
+            sentRecords.removeLast(sentRecords.count - 200)
+        }
+        persistSentRecords()
+        MobileLog.write("记录发送：\(names.count) 个文件 → \(target)")
+    }
+
+    /// 只清流水，文件本身不动
+    func clearSentRecords() {
+        sentRecords.removeAll()
+        persistSentRecords()
+    }
+
+    // MARK: - 从相册发送
+
+    /// 相册里选中的图片/视频：先落成临时文件，再走原来的发送流程
+    func sendFromAlbum(_ items: [PhotosPickerItem]) {
+        guard !items.isEmpty else { return }
+        Task {
+            var urls: [URL] = []
+            for item in items {
+                if let media = try? await item.loadTransferable(type: PickedMedia.self) {
+                    urls.append(media.url)
+                    continue
+                }
+                // 兜底：拿不到文件就按图片数据处理
+                guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
+                let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
+                let dest = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("相册-\(UUID().uuidString).\(ext)")
+                do {
+                    try data.write(to: dest)
+                    urls.append(dest)
+                } catch {
+                    continue
+                }
+            }
+            guard !urls.isEmpty else {
+                reportError("没能读取所选照片")
+                return
+            }
+            requestSend(urls: urls)
+        }
     }
 }

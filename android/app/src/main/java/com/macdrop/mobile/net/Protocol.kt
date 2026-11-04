@@ -8,7 +8,9 @@ data class Peer(
     val port: Int,
     val manual: Boolean = false,
     /** 同一台设备的其它可用地址：首选地址连不通时依次尝试 */
-    val alternatives: List<String> = emptyList()
+    val alternatives: List<String> = emptyList(),
+    /** 通过点对点（链路本地地址）连上：对方不在当前 Wi-Fi，而是在附近直连 */
+    val peerToPeer: Boolean = false
 ) {
     val id: String get() = "$name@$host:$port"
     val endpoint: String get() = "$host:$port"

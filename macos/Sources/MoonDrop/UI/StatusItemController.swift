@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 /// 菜单栏控制器。
 ///
@@ -95,7 +96,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             title.isEnabled = false
             menu.addItem(title)
             for peer in peers {
-                let item = NSMenuItem(title: "  \(peer.name)  (\(peer.host))",
+                let mark = peer.isPeerToPeer ? " · 点对点" : ""
+                let item = NSMenuItem(title: "  \(peer.name)\(mark)  (\(peer.host))",
                                       action: #selector(sendSelection(to:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = peer.id
@@ -131,6 +133,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         sendFile.target = self
         menu.addItem(sendFile)
 
+        let sendAlbum = NSMenuItem(title: "从相册发送…",
+                                   action: #selector(pickFromAlbumAndSend), keyEquivalent: "")
+        sendAlbum.target = self
+        menu.addItem(sendAlbum)
+
         menu.addItem(.separator())
 
         let toggle = NSMenuItem(title: panel.isVisible ? "隐藏悬浮窗" : "显示悬浮窗",
@@ -155,6 +162,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                               action: #selector(showLogs), keyEquivalent: "")
         logs.target = self
         menu.addItem(logs)
+
+        let clearLogs = NSMenuItem(title: "清空传输记录",
+                                   action: #selector(clearTransferLog), keyEquivalent: "")
+        clearLogs.target = self
+        menu.addItem(clearLogs)
 
         let quit = NSMenuItem(title: "退出 MoonDrop",
                               action: #selector(quit), keyEquivalent: "q")
@@ -187,12 +199,36 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func pickAndSend() {
         guard let peer = peers.first else { return }
         let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
+        panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = true
         panel.prompt = "发送"
         guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
         onSend?(panel.urls, peer)
+    }
+
+    /// 从「照片」图库或磁盘里挑图片/视频发送
+    @objc private func pickFromAlbumAndSend() {
+        guard let peer = peers.first else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.image, .movie]
+        panel.prompt = "发送"
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        onSend?(panel.urls, peer)
+    }
+
+    @objc private func clearTransferLog() {
+        let alert = NSAlert()
+        alert.messageText = "清空传输记录？"
+        alert.informativeText = "只清空本机的传输日志，已收发的文件不受影响。"
+        alert.addButton(withTitle: "清空")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        Logger.clear()
+        Logger.write("传输记录已清空")
     }
 
     @objc private func togglePanel() { panel.toggle() }
@@ -336,5 +372,10 @@ enum Logger {
             try? Data(line.utf8).write(to: logFile)
         }
         NSLog("[MoonDrop] %@", s)
+    }
+
+    /// 清空传输记录：只清日志文件，已收发的文件不动
+    static func clear() {
+        try? Data().write(to: logFile)
     }
 }

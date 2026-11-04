@@ -123,7 +123,9 @@ class ReceiverService : Service() {
             baseName = desired
             instanceSuffix = 0
         }
-        val instanceName = if (instanceSuffix == 0) baseName else "$baseName ($instanceSuffix)"
+        val instanceName = serviceInstanceName(
+            if (instanceSuffix == 0) baseName else "$baseName ($instanceSuffix)"
+        )
         val info = NsdServiceInfo().apply {
             serviceName = instanceName
             serviceType = SERVICE_TYPE
@@ -135,12 +137,14 @@ class ReceiverService : Service() {
                 registerAttempts = 0
                 sameNameFailures = 0
                 ReceiverRuntime.advertising = true
+                ReceiverRuntime.advertiseError = ""
                 ReceiverRuntime.notifyChanged()
                 MobileLog.write("广播成功：${serviceInfo.serviceName} :$port")
             }
 
             override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
                 ReceiverRuntime.advertising = false
+                ReceiverRuntime.advertiseError = describeFailure(errorCode)
                 ReceiverRuntime.notifyChanged()
                 MobileLog.write("广播失败：$errorCode")
                 // 同一个名字连失败两次，几乎一定是网段里已有同名实例（第二台会永远隐身）
@@ -169,6 +173,18 @@ class ReceiverService : Service() {
             ReceiverRuntime.advertising = false
             retryRegister(port)
         }
+        // 有些系统（定制 ROM、模拟器）注册成功却不回调，12 秒后自己再注册一次，
+        // 保证记录真的发了出去；只补一次，避免无限循环
+        mainHandler.postDelayed({
+            if (!ReceiverRuntime.advertising &&
+                ReceiverRuntime.advertiseError.isEmpty() &&
+                registerAttempts == 0
+            ) {
+                MobileLog.write("广播状态未确认，重新注册一次")
+                registerAttempts = 1
+                reregister()
+            }
+        }, 12_000)
     }
 
     private fun retryRegister(port: Int) {
@@ -218,6 +234,36 @@ class ReceiverService : Service() {
             .setContentIntent(pending)
             .setOngoing(true)
             .build()
+    }
+
+    /**
+     * mDNS 实例名规范：最长 63 字节（UTF-8），且不能含空格等控制字符。
+     * Build.MODEL 常常带空格（"Pixel 8 Pro"），不处理的话 NSD 注册可能直接失败，
+     * 那台设备就会在所有别的设备列表里彻底隐身。
+     */
+    private fun serviceInstanceName(desired: String): String {
+        val cleaned = desired.replace(Regex("[\\s\\p{Cntrl}]"), "_")
+            .trim('_')
+            .ifEmpty { "MoonDrop" }
+        var bytes = 0
+        val builder = StringBuilder()
+        for (ch in cleaned) {
+            val size = ch.toString().toByteArray(Charsets.UTF_8).size
+            if (bytes + size > 60) break
+            bytes += size
+            builder.append(ch)
+        }
+        return builder.toString().ifEmpty { "MoonDrop" }
+    }
+
+    /** 把 NsdManager 的失败码翻译成人话，直接显示在「本机」卡片上 */
+    private fun describeFailure(errorCode: Int): String = when (errorCode) {
+        NsdManager.FAILURE_ALREADY_ACTIVE -> "注册失败：服务名已被占用（会自动换个名字重试）"
+        NsdManager.FAILURE_BAD_PARAMETERS -> "注册失败：参数不合法（服务名可能含不支持的字符）"
+        NsdManager.FAILURE_INTERNAL_ERROR -> "注册失败：系统内部错误"
+        NsdManager.FAILURE_MAX_LIMIT -> "注册失败：超过系统上限"
+        NsdManager.FAILURE_OPERATION_NOT_RUNNING -> "注册失败：操作未在运行"
+        else -> "注册失败：代码 $errorCode"
     }
 
     companion object {

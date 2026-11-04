@@ -268,13 +268,18 @@ final class PeerBrowser: NSObject {
         }
     }
 
-    /// 按可用性排序的地址列表：局域网可路由 IPv4 优先，
-    /// 最后才是 169.254 链路本地（AWDL，首次建链要 1~2 秒）
+    /// 按可用性排序的地址列表：
+    /// 1. 本机所在网段的私有 IPv4（最稳）
+    /// 2. 链路本地 169.254（AWDL 点对点）——对方不在当前 Wi-Fi 时，只有这条路通
+    /// 3. 对方别的网段的私有 IPv4（走不通，留作兜底）
+    /// 4. 其它 IPv4
+    /// 5. IPv6（全局优先于 fe80 链路本地）
     private static func candidates(from addresses: [Data]) -> [(ip: String, score: Int)] {
+        let prefixes = ourSubnetPrefixes()
         var result: [(ip: String, score: Int)] = []
         for data in addresses {
             guard let (ip, isV6) = hostAddress(from: data) else { continue }
-            result.append((ip, score(ip: ip, isV6: isV6)))
+            result.append((ip, score(ip: ip, isV6: isV6, prefixes: prefixes)))
         }
         return result.enumerated()
             .sorted { lhs, rhs in
@@ -284,13 +289,35 @@ final class PeerBrowser: NSObject {
             .map { $0.element }
     }
 
-    private static func score(ip: String, isV6: Bool) -> Int {
-        if !isV6 {
-            if ip.hasPrefix("169.254.") { return 3 }     // 链路本地：AWDL
-            if isPrivateIPv4(ip) { return 0 }             // 10/172.16-31/192.168
-            return 1
+    /// 本机各 IPv4 网卡的 /24 网段前缀，例如 ["10.0.1", "192.168.0"]
+    private static func ourSubnetPrefixes() -> Set<String> {
+        var result = Set<String>()
+        for ip in localIPv4s() {
+            let parts = ip.split(separator: ".").map(String.init)
+            if parts.count == 4 { result.insert(parts[0...2].joined(separator: ".")) }
         }
-        return ip.lowercased().hasPrefix("fe80:") ? 4 : 2
+        return result
+    }
+
+    /// 本机 IPv4 地址（不含 IPv6 与链路本地）
+    private static func localIPv4s() -> [String] {
+        var result: [String] = []
+        for address in localAddresses() where !address.contains(":") && !address.hasPrefix("169.254.") {
+            result.append(address)
+        }
+        return result
+    }
+
+    private static func score(ip: String, isV6: Bool, prefixes: Set<String>) -> Int {
+        if !isV6 {
+            if ip.hasPrefix("169.254.") { return 1 }     // 链路本地：AWDL 点对点
+            if isPrivateIPv4(ip) {
+                let parts = ip.split(separator: ".").map(String.init)
+                return parts.count == 4 && prefixes.contains(parts[0...2].joined(separator: ".")) ? 0 : 2
+            }
+            return 3
+        }
+        return ip.lowercased().hasPrefix("fe80:") ? 5 : 4
     }
 
     private static func isPrivateIPv4(_ ip: String) -> Bool {
@@ -408,7 +435,8 @@ extension PeerBrowser: NetServiceDelegate {
             }
         }
         upsert(Peer(name: sender.name, host: best.ip, port: UInt16(clamping: sender.port),
-                    alternatives: alternatives),
+                    alternatives: alternatives,
+                    isPeerToPeer: best.ip.hasPrefix("169.254.")),
                serviceName: sender.name)
     }
 

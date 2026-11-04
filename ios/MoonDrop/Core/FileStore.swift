@@ -61,6 +61,16 @@ final class FileStore {
         items(in: receivedDir)
     }
 
+    /// 清空已接收目录里的内容（文件本身一起删掉）
+    func clearReceived() {
+        guard let items = try? fm.contentsOfDirectory(at: receivedDir,
+                                                     includingPropertiesForKeys: nil,
+                                                     options: [.skipsHiddenFiles]) else { return }
+        for item in items {
+            try? fm.removeItem(at: item)
+        }
+    }
+
     func items(in directory: URL) -> [ReceivedItem] {
         let keys: [URLResourceKey] = [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey]
         guard let urls = try? fm.contentsOfDirectory(at: directory,

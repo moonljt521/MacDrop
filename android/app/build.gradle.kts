@@ -11,8 +11,8 @@ android {
         applicationId = "com.macdrop.mobile"
         minSdk = 29
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.5.0"
+        versionCode = 3
+        versionName = "1.6.0"
     }
 
     buildTypes {

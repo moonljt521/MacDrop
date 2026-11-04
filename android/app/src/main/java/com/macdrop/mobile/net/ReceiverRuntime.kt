@@ -32,6 +32,10 @@ object ReceiverRuntime {
     @Volatile
     var advertising: Boolean = false
 
+    /** 注册失败的原因，直接显示在「本机」卡片上 */
+    @Volatile
+    var advertiseError: String = ""
+
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
     private val main = Handler(Looper.getMainLooper())
 

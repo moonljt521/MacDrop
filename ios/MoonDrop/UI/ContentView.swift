@@ -1,9 +1,8 @@
 import SwiftUI
+import PhotosUI
 import UniformTypeIdentifiers
 
 struct ContentView: View {
-
-    private enum ImportKind { case files, folder }
 
     private enum Presentation: Identifiable {
         case manualPeer
@@ -22,75 +21,100 @@ struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
 
-    @State private var importKind: ImportKind = .files
     @State private var showingImporter = false
     @State private var presented: Presentation?
     @State private var showingRename = false
     @State private var renameText = ""
+    @State private var photoItems: [PhotosPickerItem] = []
+    @State private var confirmClearSent = false
+    @State private var confirmClearReceived = false
 
     var body: some View {
         NavigationStack {
-            List {
-                localSection
-                peersSection
-                pendingSection
-                sendSection
-                transferSection
-                receivedSection
-                footerSection
-            }
-            .navigationTitle("MoonDrop")
-            .fileImporter(isPresented: $showingImporter,
-                          allowedContentTypes: importKind == .files ? [.data] : [.folder],
-                          allowsMultipleSelection: true) { result in
-                switch result {
-                case .success(let urls): model.requestSend(urls: urls)
-                case .failure(let error): model.reportError(error.localizedDescription)
+            listView
+        }
+        .alert("重命名本机", isPresented: $showingRename) {
+            TextField("例如 书房的那台 iPhone", text: $renameText)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button("保存") { model.rename(to: renameText) }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("其他设备的 MoonDrop 列表里显示这个名字，最长 24 个字符。")
+        }
+        .confirmationDialog("清空已发送记录？", isPresented: $confirmClearSent) {
+            Button("清空记录", role: .destructive) { model.clearSentRecords() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("只清列表，已经发出去的文件不受影响。")
+        }
+        .confirmationDialog("清空已接收？", isPresented: $confirmClearReceived) {
+            Button("删除全部已接收文件", role: .destructive) { model.clearReceived() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("已接收的文件会从「文件 → 我的 iPhone → MoonDrop → Received」里删除，无法恢复。")
+        }
+        .confirmationDialog("发送到哪台设备？",
+                            isPresented: $model.showingDevicePicker,
+                            titleVisibility: .visible) {
+            ForEach(model.peers) { peer in
+                Button("\(peer.name)（\(peer.host)）") {
+                    model.choosePeer(peer)
                 }
             }
-            .sheet(item: $presented) { item in
-                switch item {
-                case .manualPeer:
-                    ManualPeerSheet()
-                        .environmentObject(model)
-                case .file(let url):
-                    QuickLookSheet(url: url)
-                case .folder(let url):
-                    FolderBrowserView(url: url, store: model.store)
-                }
+            Button("取消", role: .cancel) {
+                model.cancelDevicePicker()
             }
-            .alert("重命名本机", isPresented: $showingRename) {
-                TextField("例如 书房的那台 iPhone", text: $renameText)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                Button("保存") { model.rename(to: renameText) }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("其他设备的 MoonDrop 列表里显示这个名字，最长 24 个字符。")
+        }
+        .onChange(of: photoItems) { items in
+            guard !items.isEmpty else { return }
+            photoItems = []
+            model.sendFromAlbum(items)
+        }
+    }
+
+    /// 单独拆出来，避免 body 的修饰符链太长导致编译器超时
+    private var listView: some View {
+        List {
+            localSection
+            peersSection
+            pendingSection
+            sendSection
+            transferSection
+            sentSection
+            receivedSection
+            footerSection
+        }
+        .navigationTitle("MoonDrop")
+        .fileImporter(isPresented: $showingImporter,
+                      allowedContentTypes: [.data],
+                      allowsMultipleSelection: true) { result in
+            switch result {
+            case .success(let urls): model.requestSend(urls: urls)
+            case .failure(let error): model.reportError(error.localizedDescription)
             }
-            .confirmationDialog("发送到哪台设备？",
-                                isPresented: $model.showingDevicePicker,
-                                titleVisibility: .visible) {
-                ForEach(model.peers) { peer in
-                    Button("\(peer.name)（\(peer.host)）") {
-                        model.choosePeer(peer)
-                    }
-                }
-                Button("取消", role: .cancel) {
-                    model.cancelDevicePicker()
-                }
+        }
+        .sheet(item: $presented) { item in
+            switch item {
+            case .manualPeer:
+                ManualPeerSheet()
+                    .environmentObject(model)
+            case .file(let url):
+                QuickLookSheet(url: url)
+            case .folder(let url):
+                FolderBrowserView(url: url, store: model.store)
             }
-            .onOpenURL { url in
-                if url.scheme == "moondrop" {
-                    model.handleSharedLink()
-                } else {
-                    model.handleIncoming(urls: [url])
-                }
+        }
+        .onOpenURL { url in
+            if url.scheme == "moondrop" {
+                model.handleSharedLink()
+            } else {
+                model.handleIncoming(urls: [url])
             }
-            .onChange(of: scenePhase) { phase in
-                if phase == .active {
-                    model.handleForeground()
-                }
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
+                model.handleForeground()
             }
         }
     }
@@ -143,7 +167,7 @@ struct ContentView: View {
                 Text("未发现设备。确认对端已打开 MoonDrop，并处于同一 Wi-Fi。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                Text("iPhone 切到后台会停止广播，请让对端留在前台；仍看不见就用下面的扫描或手动填 IP。")
+                Text("同一 Wi-Fi 的设备会直接出现；附近的 Apple 设备即使连着别的 Wi-Fi，也会以「点对点」出现（Android 设备必须同一 Wi-Fi）。iPhone 切到后台会停止广播，请让对端留在前台；仍看不见就扫描或手动填 IP。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -152,8 +176,20 @@ struct ContentView: View {
                         Image(systemName: peer.isManual ? "link" : "desktopcomputer")
                             .foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(peer.name)
-                            Text("\(peer.host):\(String(peer.port))")
+                            HStack(spacing: 6) {
+                                Text(peer.name)
+                                if peer.isPeerToPeer {
+                                    Text("点对点")
+                                        .font(.caption2)
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1)
+                                        .background(Color.orange.opacity(0.18))
+                                        .cornerRadius(4)
+                                }
+                            }
+                            Text(peer.isPeerToPeer
+                                 ? "直连，不在同一 Wi-Fi · \(peer.host):\(String(peer.port))"
+                                 : "\(peer.host):\(String(peer.port))")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -183,22 +219,20 @@ struct ContentView: View {
     private var sendSection: some View {
         Section {
             Button {
-                importKind = .files
                 showingImporter = true
             } label: {
                 Label("选择文件发送", systemImage: "doc.badge.plus")
             }
             .disabled(model.peers.isEmpty || model.sending)
 
-            Button {
-                importKind = .folder
-                showingImporter = true
-            } label: {
-                Label("选择文件夹发送", systemImage: "folder.badge.plus")
+            PhotosPicker(selection: $photoItems,
+                         maxSelectionCount: 20,
+                         matching: .any(of: [.images, .videos])) {
+                Label("从相册发送", systemImage: "photo.on.rectangle")
             }
             .disabled(model.peers.isEmpty || model.sending)
 
-            Text(model.peers.isEmpty ? "没有可用设备" : "选择文件后会让你选择目标设备")
+            Text(model.peers.isEmpty ? "没有可用设备" : "选完文件后会让你选择目标设备")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } header: {
@@ -271,6 +305,41 @@ struct ContentView: View {
         }
     }
 
+    private var sentSection: some View {
+        Section {
+            if model.sentRecords.isEmpty {
+                Text("暂无发送记录")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(model.sentRecords) { record in
+                    HStack(spacing: 10) {
+                        Image(systemName: "paperplane")
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(record.names.count == 1 ? record.names[0] : "\(record.names.count) 个文件")
+                                .lineLimit(1)
+                            Text("→ \(record.target) · \(Self.sizeText(record.size)) · \(record.date.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                }
+            }
+        } header: {
+            HStack {
+                Text("已发送")
+                Spacer()
+                if !model.sentRecords.isEmpty {
+                    Button("清空") { confirmClearSent = true }
+                        .font(.caption)
+                        .buttonStyle(.borderless)
+                }
+            }
+        }
+    }
+
     private var receivedSection: some View {
         Section {
             if model.received.isEmpty {
@@ -320,6 +389,11 @@ struct ContentView: View {
             HStack {
                 Text("已接收")
                 Spacer()
+                if !model.received.isEmpty {
+                    Button("清空") { confirmClearReceived = true }
+                        .font(.caption)
+                        .buttonStyle(.borderless)
+                }
                 Button("刷新") { model.refreshReceived() }
                     .font(.caption)
                     .buttonStyle(.borderless)

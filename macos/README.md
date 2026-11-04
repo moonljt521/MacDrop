@@ -16,10 +16,10 @@ Produces `dist/MoonDrop.app` and `dist/MoonDrop.zip`. On the target Mac, unzip a
 
 | Action | How |
 |---|---|
-| Send | Drag files onto the circular panel, or use the menu → **Send Finder Selection** / **Choose Files to Send** |
-| Pick a target | With several peers online the panel lists them; with one it sends directly |
+| Send | Drag files onto the circular panel, or use the menu → **Send Finder Selection** / **Choose Files to Send** / **Send from Photos…** |
+| Pick a target | With several peers online the panel lists them; with one it sends directly. Peers tagged "peer-to-peer" sit on a different Wi-Fi and are reached over the Apple direct link |
 | Receive | Files land in `~/Downloads/来自另一台Mac`; the panel shows progress and the received name |
-| Log | Menu → **Transfer Log** (`~/Library/Application Support/MoonDrop/logs/transfer.log`) |
+| Records | Menu → **Transfer Log** (`~/Library/Application Support/MoonDrop/logs/transfer.log`) and **Clear Transfer Log** (log only, files are untouched) |
 
 Permissions requested on first launch: **Local Network** (discovery and transfer) and **Automation** (reading the Finder selection).
 

@@ -51,6 +51,11 @@ class Discovery(context: Context, private val deviceId: String) {
 
     private val healthTick = object : Runnable {
         override fun run() {
+            // 部分国产 ROM 会在后台把组播锁收掉，之后 mDNS 永远收不到回应
+            if (!multicastLock.isHeld) {
+                MobileLog.write("组播锁被系统回收，重新获取")
+                runCatching { multicastLock.acquire() }
+            }
             val stalled = System.currentTimeMillis() - lastActivity > STALE_AFTER_MS
             if (stalled && listener != null) {
                 MobileLog.write("发现超过 ${STALE_AFTER_MS / 1000} 秒没有回调，重启发现")
@@ -285,7 +290,9 @@ class Discovery(context: Context, private val deviceId: String) {
 
         val name = info.serviceName ?: host
         MobileLog.write("对端就绪：$name → $host:$port")
-        val peer = Peer(name = name, host = host, port = port)
+        // 链路本地地址 = 点对点直连（对方不在当前 Wi-Fi）
+        val peer = Peer(name = name, host = host, port = port,
+                        peerToPeer = host.startsWith("169.254."))
         synchronized(lock) {
             pendingRemovals.remove(name)?.let { mainHandler.removeCallbacks(it) }
             resolveAttempts.remove(name)

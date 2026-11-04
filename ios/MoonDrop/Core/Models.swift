@@ -8,9 +8,20 @@ struct Peer: Identifiable, Hashable {
     var isManual: Bool = false
     /// 同一台设备的其它可用地址：首选地址连不通时依次尝试
     var alternatives: [String] = []
+    /// 通过点对点（AWDL）连上：对方不在当前 Wi-Fi，而是在附近用直连通道
+    var isPeerToPeer: Bool = false
 
     /// 去重用的地址键：设备改名后 Bonjour 实例名会变，按它才能认出是同一台
     var endpoint: String { "\(host):\(port)" }
+}
+
+/// 一次发送的记录，用于「已发送」列表
+struct SentRecord: Identifiable, Hashable, Codable {
+    var id: String = UUID().uuidString
+    var names: [String]
+    var target: String
+    var size: Int64
+    var date: Date
 }
 
 struct OutgoingFile {

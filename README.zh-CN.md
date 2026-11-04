@@ -6,9 +6,9 @@
 
 | 平台 | 技术栈 | 目录 | 最低系统 | 版本 |
 |---|---|---|---|---|
-| macOS | Swift · AppKit | [`macos/`](macos) | macOS 13 | 1.5 |
-| iOS | Swift · SwiftUI · Network.framework | [`ios/`](ios) | iOS 16 | 1.5.0 |
-| Android | Kotlin · 平台原生 API | [`android/`](android) | Android 10（API 29） | 1.5.0 |
+| macOS | Swift · AppKit | [`macos/`](macos) | macOS 13 | 1.6 |
+| iOS | Swift · SwiftUI · Network.framework | [`ios/`](ios) | iOS 16 | 1.6.0 |
+| Android | Kotlin · 平台原生 API | [`android/`](android) | Android 10（API 29） | 1.6.0 |
 
 > 产品名是 MoonDrop；代码仓库与局域网协议沿用原来的 `macdrop` 标识（`_macdrop._tcp`、`com.macdrop.*`），以保证已安装的旧版本仍能互通。
 
@@ -16,12 +16,14 @@
 
 - Bonjour 自动发现，并自带自愈（解析重试、广播重发、无回调看门狗）
 - 组播被屏蔽的网络里可用「扫描局域网设备」或手动填 IP 兜底
+- 附近连着别的 Wi-Fi 的 Apple 设备也会列出来（标「点对点」，走 AWDL 直连）；Android 设备必须同一 Wi-Fi
 - 三端都能自定义本机显示名（macOS：菜单栏 → 重命名本机；iOS / Android：本机 → 重命名本机）
-- 发送文件与文件夹，目录结构在接收端逐级还原
+- 发送文件，或直接从相册挑图片/视频发（iOS / Android 有「从相册发送」，macOS 菜单里有「从相册发送…」）
 - 任意平台互收，发送与接收两端都有进度
 - 支持从其他 App 打开或分享（iOS：用 MoonDrop 打开 / 分享；Android：系统分享面板）
 - 点击已接收文件可用系统查看器预览；iOS 上文件夹可在 App 内浏览
 - 收到的图片/视频自动存入系统相册（iOS 与 Android，可在本机卡片里关闭）
+- 「已发送」「已接收」都有记录，可一键清空（清空已接收会删掉文件本身）
 - 交付前校验字节数，坏文件不会被当成完整文件
 
 ## 工作原理
@@ -89,12 +91,14 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ## 使用
 
 1. 两台设备都打开 MoonDrop，连接同一网络。
-2. 发送：选择文件（或在 macOS 上拖到悬浮窗）；iOS 与 Android 会询问目标设备。
+2. 发送：选择文件、从相册挑图片/视频（或在 macOS 上拖到悬浮窗）；iOS 与 Android 会询问目标设备。
 3. 接收端提示已收到的文件——点击可预览，用「分享」可继续转发；图片/视频会另存一份到系统相册。
+
+记录：「已发送」和「已接收」各有一份列表，标题栏的「清空」可以一键清掉（清空已接收会连文件一起删，相册里的副本保留）。
 
 想让列表更好认：macOS 菜单栏 → **重命名本机**，iOS / Android 在「本机」卡片里重命名。别的设备就显示这个名字。
 
-看不见设备时（都在同一 Wi-Fi、App 都开着）：先看「本机」卡片里的地址与广播状态，再用 **扫描局域网设备**；仍不行就手动填对端 IP。
+看不见设备时（都在同一 Wi-Fi、App 都开着）：先看「本机」卡片里的地址与广播状态，再用 **扫描局域网设备**；仍不行就手动填对端 IP。列表里带「点对点」标记的设备连的是别的 Wi-Fi，靠 AirDrop 同款的直连通道，只有 Apple 设备能做到。
 
 从其他 App 发送时：Android 用 **分享 → MoonDrop**，iOS 用 **用 MoonDrop 打开 / 分享 → MoonDrop**。文件先进入待发送区，选好目标后才会真正发送。
 
@@ -128,6 +132,7 @@ cd macos
 
 - 传输不可续传，中断即丢弃，需要重发。
 - iOS 切到后台会暂停发现与监听（回到前台会自动重新广播）；大文件请让接收端留在前台。Android 靠前台服务维持。
+- 跨 Wi-Fi 只对 Apple 设备成立（点对点 AWDL）；Android 设备必须同一 Wi-Fi。
 - 扫描只能找到监听默认端口 52345 的设备；开了客户端隔离（AP isolation）的网络里单播也不通，任何局域网方案都无解。
 - 只校验字节数，不校验内容哈希。
 - Android 的已接收列表是平铺的，看不出目录层级。

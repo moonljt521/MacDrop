@@ -191,6 +191,19 @@ class MediaStoreStore(context: Context) {
         resolver.delete(entry.uri, null, null)
     }
 
+    /**
+     * 清空已接收：删除「下载/来自另一台Mac」下的全部条目。
+     * 相册里的副本不动——那是用户自己的照片。
+     */
+    fun clearReceived() {
+        val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        resolver.delete(
+            collection,
+            "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?",
+            arrayOf("$baseRelative%")
+        )
+    }
+
     private val relativeBase: String get() = "$baseRelative/"
 
     private fun relativeDirectories(path: String?, root: String?): List<String> {

@@ -6,9 +6,9 @@ Native file transfer between **Mac, iPhone and Android** over the local network.
 
 | Platform | Stack | Directory | Minimum OS | Version |
 |---|---|---|---|---|
-| macOS | Swift · AppKit | [`macos/`](macos) | macOS 13 | 1.5 |
-| iOS | Swift · SwiftUI · Network.framework | [`ios/`](ios) | iOS 16 | 1.5.0 |
-| Android | Kotlin · platform APIs | [`android/`](android) | Android 10 (API 29) | 1.5.0 |
+| macOS | Swift · AppKit | [`macos/`](macos) | macOS 13 | 1.6 |
+| iOS | Swift · SwiftUI · Network.framework | [`ios/`](ios) | iOS 16 | 1.6.0 |
+| Android | Kotlin · platform APIs | [`android/`](android) | Android 10 (API 29) | 1.6.0 |
 
 > The product is MoonDrop; the repository and the LAN protocol keep their original `macdrop` identifiers (`_macdrop._tcp`, `com.macdrop.*`) so existing installs stay compatible.
 
@@ -16,12 +16,14 @@ Native file transfer between **Mac, iPhone and Android** over the local network.
 
 - Bonjour discovery, self-healing (resolve retries, re-advertising, watchdog)
 - Subnet scan and manual peer entry for networks that block multicast
+- Apple devices on a *different* Wi-Fi in range show up too, tagged "peer-to-peer" (AWDL); Android devices need the same Wi-Fi
 - Custom device name on every platform (menu bar → Rename this Mac; iOS: 本机 → 重命名本机; Android: 本机 → 重命名本机)
-- Send files and folders; folder structure is recreated on the receiver
+- Send files, or pick photos and videos straight from the library (iOS / Android: Send from Photos; macOS: menu → Send from Photos…)
 - Receive on any platform, with progress on both ends
 - Open or share files from other apps (iOS: Open in / Share, Android: share sheet)
 - Tap a received file to preview it with the system viewer; folders are browsable in-app on iOS
 - Received photos and videos are saved to the system photo library (iOS and Android; can be turned off)
+- "Sent" and "Received" keep a log, each with a one-tap clear (clearing received deletes the files)
 - Verified delivery: the byte count is checked before a file is handed over
 
 ## How it works
@@ -89,12 +91,14 @@ Received files are published to **Download/来自另一台Mac**. The receiver ru
 ## Usage
 
 1. Start MoonDrop on both devices, on the same network.
-2. Send: pick files (or drag them onto the macOS panel). iOS and Android ask which device to use.
+2. Send: pick files, pick photos/videos from the library (or drag them onto the macOS panel). iOS and Android ask which device to use.
 3. The receiver announces the finished file — tap it to preview, or use **Share** to pass it on. Photos and videos are copied into the system library as well.
+
+History: "Sent" and "Received" each keep a list with a one-tap clear in the section header (clearing received deletes the files; the photo library copies stay).
 
 Name the devices you can see: **Rename this Mac** in the macOS menu, and 重命名本机 in the 本机 card on iOS / Android.
 
-When devices are online on the same Wi-Fi but do not appear: check the address and advertise line in the 本机 card, then use **Scan the LAN**; if that fails too, add the peer by IP.
+When devices are online on the same Wi-Fi but do not appear: check the address and advertise line in the 本机 card, then use **Scan the LAN**; if that fails too, add the peer by IP. Peers tagged "peer-to-peer" are on a different Wi-Fi and reachable over the AirDrop-style direct link — Apple devices only.
 
 To send from another app, use **Share → MoonDrop** (Android) or **Open in / Share → MoonDrop** (iOS). Files are staged and are only sent once you pick a target.
 
@@ -129,6 +133,7 @@ cd macos
 - Transfers are not resumable; an interrupted transfer is discarded.
 - iOS suspends discovery and listening in backgrounded apps, so keep the receiver in the foreground for large files; Android keeps them alive with a foreground service.
 - The subnet scan only finds devices listening on the default port `52345`, and nothing works across a network that isolates clients from each other.
+- Reaching a device on a *different* Wi-Fi works only between Apple devices (AWDL peer-to-peer); Android needs the same Wi-Fi.
 - Only the byte count is verified, not a content hash.
 - Android lists received files flat, without their folder hierarchy.
 

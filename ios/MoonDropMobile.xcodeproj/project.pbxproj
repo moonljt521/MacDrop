@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		0FB128E84001C560F9AD19E5 /* TransferClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D13AD2CFEAADF9CC0AA4A90 /* TransferClient.swift */; };
+		3334FBDC1305BB5D5C8BF2D5 /* PickedMedia.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C819F9CB8B46CA2EB3B792E /* PickedMedia.swift */; };
 		369D9F25E3A90F9C9F0A6B5B /* MoonDropApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F8E728517806DB841C006DA /* MoonDropApp.swift */; };
 		36B1C77B04CA4D531B33B3AC /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 860981DB9FEFDADBAA740D7C /* ContentView.swift */; };
 		447E2FEF4746F495F7E12B95 /* TransferClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D13AD2CFEAADF9CC0AA4A90 /* TransferClient.swift */; };
@@ -60,6 +61,7 @@
 		46D3DFAD7AF764DD61D5BE22 /* PeerBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerBrowser.swift; sourceTree = "<group>"; };
 		4BD321994E24646CC4287429 /* MoonDropMobile.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = MoonDropMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		59E4503850C120000F88B8FA /* TransferServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferServer.swift; sourceTree = "<group>"; };
+		6C819F9CB8B46CA2EB3B792E /* PickedMedia.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PickedMedia.swift; sourceTree = "<group>"; };
 		70004AC12CE265A4BC2BD7DB /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		7455CEAE9F7D5D1E9DE28DAC /* FileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileStore.swift; sourceTree = "<group>"; };
 		7F718897AB8E3F8157E25FFF /* MoonDrop.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MoonDrop.entitlements; sourceTree = "<group>"; };
@@ -90,6 +92,7 @@
 				31BCD6740F3D4317281A2C41 /* Models.swift */,
 				46D3DFAD7AF764DD61D5BE22 /* PeerBrowser.swift */,
 				24C8D5FE0AC00C8D165D35FE /* PhotoSaver.swift */,
+				6C819F9CB8B46CA2EB3B792E /* PickedMedia.swift */,
 				A380154261EC3B3E293DAB9B /* SubnetScan.swift */,
 				9D13AD2CFEAADF9CC0AA4A90 /* TransferClient.swift */,
 				59E4503850C120000F88B8FA /* TransferServer.swift */,
@@ -251,6 +254,7 @@
 				369D9F25E3A90F9C9F0A6B5B /* MoonDropApp.swift in Sources */,
 				DE7C21C89B25BF411F88279B /* PeerBrowser.swift in Sources */,
 				AC4AA8B2C14DC897027332A9 /* PhotoSaver.swift in Sources */,
+				3334FBDC1305BB5D5C8BF2D5 /* PickedMedia.swift in Sources */,
 				F28DD9C079457E46E30709C4 /* QuickLookPreview.swift in Sources */,
 				CC5DA6B752399997C4008FBB /* SubnetScan.swift in Sources */,
 				447E2FEF4746F495F7E12B95 /* TransferClient.swift in Sources */,
@@ -389,7 +393,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -402,7 +406,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				MARKETING_VERSION = 1.5.0;
+				MARKETING_VERSION = 1.6.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -447,7 +451,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -466,7 +470,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				MARKETING_VERSION = 1.5.0;
+				MARKETING_VERSION = 1.6.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

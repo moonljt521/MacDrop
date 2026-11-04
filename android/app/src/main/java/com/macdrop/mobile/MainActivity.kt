@@ -40,6 +40,8 @@ import com.macdrop.mobile.net.TransferClient
 import com.macdrop.mobile.store.GallerySettings
 import com.macdrop.mobile.store.MediaStoreStore
 import com.macdrop.mobile.store.ReceivedEntry
+import com.macdrop.mobile.store.SentRecord
+import com.macdrop.mobile.store.SentStore
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -59,7 +61,7 @@ class MainActivity : Activity() {
     private lateinit var scanButton: Button
     private lateinit var sendHint: TextView
     private lateinit var sendFileButton: Button
-    private lateinit var sendFolderButton: Button
+    private lateinit var sendAlbumButton: Button
     private lateinit var transferCard: LinearLayout
     private lateinit var progressBar: ProgressBar
     private lateinit var transferStatus: TextView
@@ -69,6 +71,10 @@ class MainActivity : Activity() {
     private val pendingUris = mutableListOf<Uri>()
     private lateinit var receivedContainer: LinearLayout
     private lateinit var receivedHint: TextView
+    private lateinit var sentContainer: LinearLayout
+    private lateinit var sentHint: TextView
+
+    private val sentRecords = mutableListOf<SentRecord>()
 
     private val discoveredPeers = mutableListOf<Peer>()
     private val manualPeers = mutableListOf<Peer>()
@@ -110,6 +116,7 @@ class MainActivity : Activity() {
         ReceiverRuntime.addListener(runtimeListener)
         refreshRuntime()
         refreshReceived()
+        refreshSent()
         clearOutgoingCache()
         handleIncomingIntent(intent)
     }
@@ -288,13 +295,13 @@ class MainActivity : Activity() {
             text = "选择文件发送"
             setOnClickListener { pickFiles() }
         }
-        sendFolderButton = Button(this).apply {
-            text = "选择文件夹发送"
-            setOnClickListener { pickFolder() }
+        sendAlbumButton = Button(this).apply {
+            text = "从相册发送"
+            setOnClickListener { pickFromAlbum() }
         }
         sendCard.addView(sendHint)
         sendCard.addView(sendFileButton)
-        sendCard.addView(sendFolderButton)
+        sendCard.addView(sendAlbumButton)
         root.addView(sendCard, cardParams())
 
         transferCard = card()
@@ -312,6 +319,28 @@ class MainActivity : Activity() {
         transferCard.addView(transferStatus)
         root.addView(transferCard, cardParams())
 
+        root.addView(sectionTitle("已发送"))
+        val sentCard = card()
+        sentHint = TextView(this).apply {
+            text = "暂无发送记录"
+            textSize = 13f
+            setTextColor(SECONDARY)
+            setPadding(0, dp(2), 0, dp(4))
+        }
+        sentContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        sentCard.addView(sentHint)
+        sentCard.addView(sentContainer)
+        sentCard.addView(Button(this).apply {
+            text = "清空发送记录"
+            textSize = 13f
+            setTextColor(ACCENT)
+            background = null
+            gravity = Gravity.START
+            setPadding(0, dp(6), 0, 0)
+            setOnClickListener { confirmClearSent() }
+        })
+        root.addView(sentCard, cardParams())
+
         root.addView(sectionTitle("已接收"))
         val receivedCard = card()
         receivedHint = TextView(this).apply {
@@ -322,6 +351,15 @@ class MainActivity : Activity() {
         receivedContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         receivedCard.addView(receivedHint)
         receivedCard.addView(receivedContainer)
+        receivedCard.addView(Button(this).apply {
+            text = "清空已接收（会删除文件）"
+            textSize = 13f
+            setTextColor(ACCENT)
+            background = null
+            gravity = Gravity.START
+            setPadding(0, dp(6), 0, 0)
+            setOnClickListener { confirmClearReceived() }
+        })
         root.addView(receivedCard, cardParams())
 
         root.addView(TextView(this).apply {
@@ -388,8 +426,10 @@ class MainActivity : Activity() {
         }
         val advertisePart = if (ReceiverRuntime.advertising) {
             "广播已上线"
+        } else if (ReceiverRuntime.advertiseError.isNotEmpty()) {
+            ReceiverRuntime.advertiseError
         } else {
-            "广播未上线，稍后自动重试；可改用扫描或手动填 IP"
+            "广播未确认（系统没回调），可改用扫描或手动填 IP"
         }
         return "$addressPart · $advertisePart"
     }
@@ -485,7 +525,8 @@ class MainActivity : Activity() {
         if (peers.isEmpty()) {
             peersContainer.addView(TextView(this).apply {
                 text = "未发现设备。确认对端已打开 MoonDrop，并处于同一 Wi-Fi；" +
-                    "仍看不见就用下面的「扫描局域网设备」或手动填 IP。"
+                    "仍看不见就用下面的「扫描局域网设备」或手动填 IP。" +
+                    "Android 设备必须同一 Wi-Fi，Apple 设备在附近即使连着别的 Wi-Fi 也能以「点对点」出现。"
                 textSize = 13f
                 setTextColor(SECONDARY)
                 setPadding(0, dp(4), 0, dp(4))
@@ -515,15 +556,21 @@ class MainActivity : Activity() {
 
         val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         column.addView(TextView(this).apply {
-            text = peer.name
+            text = if (peer.peerToPeer) "${peer.name} · 点对点" else peer.name
             textSize = 15f
             setTextColor(TEXT)
             typeface = Typeface.DEFAULT_BOLD
         })
         column.addView(TextView(this).apply {
-            text = if (peer.manual) "${peer.host}:${peer.port} · 手动" else "${peer.host}:${peer.port}"
+            val route = when {
+                peer.peerToPeer -> "直连，不在同一 Wi-Fi"
+                peer.manual -> "手动"
+                else -> ""
+            }
+            val address = "${peer.host}:${peer.port}"
+            text = if (route.isEmpty()) address else "$route · $address"
             textSize = 12f
-            setTextColor(SECONDARY)
+            setTextColor(if (peer.peerToPeer) ACCENT else SECONDARY)
         })
         row.addView(column, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         return row
@@ -538,7 +585,7 @@ class MainActivity : Activity() {
         }
         val enabled = peers.isNotEmpty() && !sending
         sendFileButton.isEnabled = enabled
-        sendFolderButton.isEnabled = enabled
+        sendAlbumButton.isEnabled = enabled
         updatePendingUi()
     }
 
@@ -665,7 +712,7 @@ class MainActivity : Activity() {
 
     private fun sendPending() {
         if (pendingUris.isEmpty() || sending) return
-        prepareAndSend(pendingUris.toList(), null, fromPending = true)
+        prepareAndSend(pendingUris.toList(), fromPending = true)
     }
 
     private fun mergedPeers(): List<Peer> {
@@ -784,8 +831,14 @@ class MainActivity : Activity() {
         startActivityForResult(intent, REQ_FILES)
     }
 
-    private fun pickFolder() {
-        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), REQ_FOLDER)
+    /** 从相册选图片/视频发送 */
+    private fun pickFromAlbum() {
+        val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
+        }
+        startActivityForResult(intent, REQ_ALBUM)
     }
 
     @Deprecated("Deprecated in Java")
@@ -805,18 +858,19 @@ class MainActivity : Activity() {
                 data?.data?.let { uri -> if (uris.isEmpty()) uris.add(uri) }
                 if (uris.isNotEmpty()) {
                     persistPermissions(uris)
-                    prepareAndSend(uris, null)
+                    prepareAndSend(uris)
                 }
             }
 
-            REQ_FOLDER -> data?.data?.let { tree ->
-                try {
-                    contentResolver.takePersistableUriPermission(
-                        tree, Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    )
-                } catch (_: Exception) {
+            REQ_ALBUM -> {
+                val uris = mutableListOf<Uri>()
+                data?.clipData?.let { clip ->
+                    for (index in 0 until clip.itemCount) uris.add(clip.getItemAt(index).uri)
                 }
-                prepareAndSend(listOf(tree), tree)
+                data?.data?.let { uri -> if (uris.isEmpty()) uris.add(uri) }
+                if (uris.isNotEmpty()) {
+                    prepareAndSend(uris)
+                }
             }
         }
     }
@@ -832,14 +886,10 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun prepareAndSend(uris: List<Uri>, tree: Uri?, fromPending: Boolean = false) {
+    private fun prepareAndSend(uris: List<Uri>, fromPending: Boolean = false) {
         thread(name = "macdrop-prepare") {
             try {
-                val files = if (tree != null) {
-                    collectFolder(tree)
-                } else {
-                    uris.mapNotNull { resolveFile(it) }
-                }
+                val files = uris.mapNotNull { resolveFile(it) }
                 runOnUiThread {
                     if (files.isEmpty()) {
                         toast("没有可发送的文件")
@@ -938,55 +988,6 @@ class MainActivity : Activity() {
         return OutgoingFile(uri, safe, safe, size)
     }
 
-    private fun collectFolder(treeUri: Uri): List<OutgoingFile> {
-        val rootId = DocumentsContract.getTreeDocumentId(treeUri)
-        val rootName = documentName(treeUri, rootId)
-        val output = mutableListOf<OutgoingFile>()
-
-        fun walk(parentId: String, prefix: String) {
-            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentId)
-            val projection = arrayOf(
-                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                DocumentsContract.Document.COLUMN_MIME_TYPE,
-                DocumentsContract.Document.COLUMN_SIZE
-            )
-            contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
-                while (cursor.moveToNext()) {
-                    val docId = cursor.getString(0) ?: continue
-                    val name = NetUtil.sanitizeName(cursor.getString(1) ?: "file")
-                    val mime = cursor.getString(2) ?: ""
-                    val declaredSize = if (cursor.isNull(3)) 0L else cursor.getLong(3)
-
-                    if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
-                        walk(docId, "$prefix/$name")
-                    } else {
-                        val uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
-                        val size = if (declaredSize > 0) declaredSize else lengthOf(uri)
-                        output.add(OutgoingFile(uri, name, "$prefix/$name", size))
-                    }
-                }
-            }
-        }
-
-        walk(rootId, rootName)
-        return output
-    }
-
-    private fun documentName(treeUri: Uri, documentId: String): String {
-        val uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
-        try {
-            contentResolver.query(uri,
-                arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    return NetUtil.sanitizeName(cursor.getString(0) ?: "文件夹")
-                }
-            }
-        } catch (_: Exception) {
-        }
-        return "文件夹"
-    }
-
     private fun lengthOf(uri: Uri): Long {
         return try {
             contentResolver.openAssetFileDescriptor(uri, "r")?.use { descriptor ->
@@ -1026,7 +1027,12 @@ class MainActivity : Activity() {
                     sendingProgress = 0.0
                     sendingText = ""
                     sendResult = result.fold(
-                        onSuccess = { "已发送 ${files.size} 个文件到 ${peer.name}" },
+                        onSuccess = {
+                            SentStore.add(this, files.map { file -> file.name },
+                                peer.name, files.sumOf { file -> file.size })
+                            refreshSent()
+                            "已发送 ${files.size} 个文件到 ${peer.name}"
+                        },
                         onFailure = {
                             com.macdrop.mobile.net.MobileLog.write("发送失败：${it.message}")
                             // 失败时把待发送的文件放回去，用户可以直接重试
@@ -1045,6 +1051,78 @@ class MainActivity : Activity() {
                 }
             }
         )
+    }
+
+    // MARK: - 发送记录
+
+    private fun refreshSent() {
+        sentRecords.clear()
+        sentRecords.addAll(SentStore.load(this))
+        renderSent()
+    }
+
+    private fun renderSent() {
+        sentContainer.removeAllViews()
+        sentHint.visibility = if (sentRecords.isEmpty()) View.VISIBLE else View.GONE
+        val formatter = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+        sentRecords.forEachIndexed { index, record ->
+            if (index > 0) {
+                sentContainer.addView(View(this).apply {
+                    setBackgroundColor(DIVIDER)
+                    layoutParams = LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, dp(1)
+                    )
+                })
+            }
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(2), dp(8), dp(2), dp(8))
+            }
+            val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            column.addView(TextView(this).apply {
+                text = if (record.names.size == 1) record.names[0] else "${record.names.size} 个文件"
+                textSize = 15f
+                setTextColor(TEXT)
+                maxLines = 1
+            })
+            column.addView(TextView(this).apply {
+                text = "→ ${record.target} · ${NetUtil.formatBytes(record.size)} · " +
+                    formatter.format(Date(record.date))
+                textSize = 12f
+                setTextColor(SECONDARY)
+                setPadding(0, dp(2), 0, 0)
+            })
+            row.addView(column, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            sentContainer.addView(row)
+        }
+    }
+
+    private fun confirmClearSent() {
+        if (sentRecords.isEmpty()) return
+        AlertDialog.Builder(this)
+            .setTitle("清空发送记录？")
+            .setMessage("只清列表，已经发出去的文件不受影响。")
+            .setPositiveButton("清空") { _, _ ->
+                SentStore.clear(this)
+                refreshSent()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun confirmClearReceived() {
+        AlertDialog.Builder(this)
+            .setTitle("清空已接收？")
+            .setMessage("已接收的文件会从「下载 / 来自另一台Mac」里删除，无法恢复。相册里的副本不受影响。")
+            .setPositiveButton("删除全部") { _, _ ->
+                thread(name = "macdrop-clear") {
+                    runCatching { store.clearReceived() }
+                    runOnUiThread { refreshReceived() }
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     // MARK: - 已接收文件
@@ -1266,7 +1344,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val REQ_FILES = 1001
-        private const val REQ_FOLDER = 1002
+        private const val REQ_ALBUM = 1004
         private const val REQ_NOTIFICATIONS = 1003
         private const val APK_MIME = "application/vnd.android.package-archive"
 
