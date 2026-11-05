@@ -16,7 +16,6 @@ import com.macdrop.mobile.net.ReceiverRuntime
 import com.macdrop.mobile.net.ReceiverServer
 import com.macdrop.mobile.store.GallerySettings
 import com.macdrop.mobile.store.MediaStoreStore
-import kotlin.concurrent.thread
 
 /**
  * 前台服务：应用切到后台/锁屏后仍能继续接收文件。
@@ -64,19 +63,13 @@ class ReceiverService : Service() {
             ReceiverRuntime.receiving = false
             ReceiverRuntime.progress = 1.0
             ReceiverRuntime.statusText = ""
-            ReceiverRuntime.lastResult = "已接收：${entry.name}"
-            ReceiverRuntime.notifyChanged()
-            if (GallerySettings.isEnabled(this) && GallerySettings.isMedia(entry.name)) {
-                thread(name = "macdrop-gallery") {
-                    val saved = runCatching { store.saveToGallery(entry) }.getOrNull()
-                    ReceiverRuntime.lastResult = if (saved != null) {
-                        "已接收并存入相册：${entry.name}"
-                    } else {
-                        "已接收：${entry.name}（存入相册失败）"
-                    }
-                    ReceiverRuntime.notifyChanged()
-                }
+            // 媒体在 save() 里就已经落到相册目录，这里只如实反馈，不再复制第二份
+            ReceiverRuntime.lastResult = if (GallerySettings.isInGallery(entry.relativePath)) {
+                "已接收并存入相册：${entry.name}"
+            } else {
+                "已接收：${entry.name}"
             }
+            ReceiverRuntime.notifyChanged()
         }
 
         val actualPort = receiver.start(PREFERRED_PORT)

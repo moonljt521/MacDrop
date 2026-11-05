@@ -22,8 +22,8 @@ Native file transfer between **Mac, iPhone and Android** over the local network.
 - Receive on any platform, with progress on both ends
 - Open or share files from other apps (iOS: Open in / Share, Android: share sheet)
 - Tap a received file to preview it with the system viewer; folders are browsable in-app on iOS
-- Received photos and videos are saved to the system photo library (iOS and Android; can be turned off)
-- "Sent" and "Received" keep a log, each with a one-tap clear (clearing received deletes the files)
+- Received photos and videos are saved exactly once — no duplicate gallery entries (iOS and Android; Android's toggle chooses whether media goes straight into the MoonDrop album directory)
+- "Sent" and "Received" keep a log, each with a one-tap clear (clearing received deletes ordinary files; media already in the system photo library is kept)
 - Verified delivery: the byte count is checked before a file is handed over
 
 ## How it works
@@ -41,7 +41,7 @@ Sender                                  Receiver
 - **Fallback** — if the network drops multicast, *Scan the LAN* probes port `52345` across the local /24 and adds whatever answers; manual entry by IP also works.
 - **Transfer** — HTTP/1.1 with keep-alive; 2 MiB chunks travel over up to 3 parallel connections, each acknowledged before the next one starts.
 - **Integrity** — the receiver compares the written byte count with the announced size and rejects mismatches.
-- **Delivery** — macOS and iOS move a verified file into place; Android publishes a pending `MediaStore` entry.
+- **Delivery** — macOS and iOS move a verified file into place; Android publishes a pending `MediaStore` entry. MediaStore collections are MIME-based views of one table, so Android writes images/videos straight into `Pictures/MoonDrop` or `Movies/MoonDrop` instead of saving a second copy (a JPG in `Download/` is still indexed by gallery apps).
 
 ### Endpoints
 
@@ -86,15 +86,15 @@ cd android && ./gradlew assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Received files are published to **Download/来自另一台Mac**. The receiver runs as a foreground service, so transfers continue in the background.
+Ordinary files are published to **Download/来自另一台Mac**. With the default setting, photos and videos go straight to **Pictures/MoonDrop** / **Movies/MoonDrop** as the single copy — they are not saved a second time. The receiver runs as a foreground service, so transfers continue in the background.
 
 ## Usage
 
 1. Start MoonDrop on both devices, on the same network.
 2. Send: pick files, pick photos/videos from the library (or drag them onto the macOS panel). iOS and Android ask which device to use.
-3. The receiver announces the finished file — tap it to preview, or use **Share** to pass it on. Photos and videos are copied into the system library as well.
+3. The receiver announces the finished file — tap it to preview, or use **Share** to pass it on. Photos and videos are already in the system library; MoonDrop puts them there directly rather than copying a second time.
 
-History: "Sent" and "Received" each keep a list with a one-tap clear in the section header (clearing received deletes the files; the photo library copies stay).
+History: "Sent" and "Received" each keep a list with a one-tap clear in the section header. Clearing received deletes ordinary downloaded files, but photos and videos already in the system photo library are kept on both Android and iOS — on Android they only disappear from the received list (the app remembers the clear timestamp and filters older gallery entries).
 
 Name the devices you can see: **Rename this Mac** in the macOS menu, and 重命名本机 in the 本机 card on iOS / Android.
 
@@ -110,8 +110,8 @@ To send from another app, use **Share → MoonDrop** (Android) or **Open in / Sh
 | Device name | same settings store (macOS), `com.macdrop.mobile.deviceName` (iOS), `macdrop/device_name` (Android) — falls back to the host or model name |
 | Staging | `~/Library/Application Support/MoonDrop/.staging` (macOS), app sandbox (mobile) |
 | Transfer log | `~/Library/Application Support/MoonDrop/logs/transfer.log` |
-| Received files | `~/Downloads/来自另一台Mac` (macOS), `Download/来自另一台Mac` (Android), `Files → On My iPhone → MoonDrop → Received` (iOS) |
-| Received media | `Pictures/MoonDrop` and `Movies/MoonDrop` (Android), the photo library (iOS) |
+| Received files | `~/Downloads/来自另一台Mac` (macOS), `Download/来自另一台Mac` (Android, non-media), `Files → On My iPhone → MoonDrop → Received` (iOS) |
+| Received media | `Pictures/MoonDrop` and `Movies/MoonDrop` (Android, default — this is the received file itself, not a copy), the photo library (iOS) |
 
 ## Testing
 
@@ -156,3 +156,5 @@ tools/    icon generator
 - iOS tears the published Bonjour record down when the app is suspended; re-advertise when it returns to the foreground.
 - macOS signs with a stable Apple Development identity: an ad-hoc signature resets the Local Network permission on every reinstall, so peers are listed but every send fails with `NSURLError -1009`.
 - Distribute the zip rather than the `.app` directory, so AppleDouble files do not break the signature.
+- Android gallery duplicates: `MediaStore` collections are MIME-based views of a single table, so a JPG written under `Download/` is already indexed by gallery apps. Never "save a second copy into `Pictures/`" — write media straight into its final album directory once, and have the received list query all destination directories.
+- Clearing received must not delete gallery assets: Android deletes only the `Downloads` entries and records a clear timestamp (seconds); the `Images`/`Video` queries add `DATE_ADDED > clearedAt` (timestamp is shifted back 1s so a file arriving in the same second is not hidden forever). Older photos stay in the library while the list looks empty.

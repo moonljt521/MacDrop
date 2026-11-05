@@ -22,8 +22,8 @@
 - 任意平台互收，发送与接收两端都有进度
 - 支持从其他 App 打开或分享（iOS：用 MoonDrop 打开 / 分享；Android：系统分享面板）
 - 点击已接收文件可用系统查看器预览；iOS 上文件夹可在 App 内浏览
-- 收到的图片/视频自动存入系统相册（iOS 与 Android，可在本机卡片里关闭）
-- 「已发送」「已接收」都有记录，可一键清空（清空已接收会删掉文件本身）
+- 收到的图片/视频在相册里只出现一份（iOS 与 Android；Android 的开关决定媒体是否直接落进 MoonDrop 相册目录）
+- 「已发送」「已接收」都有记录，可一键清空（清空已接收会删掉普通文件，已存入系统相册的图片/视频保留）
 - 交付前校验字节数，坏文件不会被当成完整文件
 
 ## 工作原理
@@ -41,7 +41,7 @@
 - **兜底** — 组播被屏蔽的网络里可用「扫描局域网设备」直接探测同网段 52345 端口，也可按 IP 手动添加。
 - **传输** — HTTP/1.1 + keep-alive；2 MiB 分块最多 3 路连接并发发送，每块确认后才继续。
 - **完整性** — 接收端比对已写字节数与声明大小，不一致直接拒收。
-- **交付** — macOS / iOS 校验通过后移动到目标位置；Android 发布待生效的 `MediaStore` 条目。
+- **交付** — macOS / iOS 校验通过后移动到目标位置；Android 发布待生效的 `MediaStore` 条目。`MediaStore` 的集合只是同一张表按 MIME 划分的视图（放在 `Download/` 里的 JPG 同样会被图库索引），所以 Android 把图片/视频直接写进 `Pictures/MoonDrop` 或 `Movies/MoonDrop`，不再复制第二份。
 
 ### 接口
 
@@ -86,15 +86,15 @@ cd android && ./gradlew assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-收到的文件发布到 **下载/来自另一台Mac**。接收端以前台服务运行，切到后台仍可继续接收。
+普通文件发布到 **下载/来自另一台Mac**；默认设置下，图片/视频直接写入 **Pictures/MoonDrop**、**Movies/MoonDrop**，这本身就是唯一的一份，不会额外复制。接收端以前台服务运行，切到后台仍可继续接收。
 
 ## 使用
 
 1. 两台设备都打开 MoonDrop，连接同一网络。
 2. 发送：选择文件、从相册挑图片/视频（或在 macOS 上拖到悬浮窗）；iOS 与 Android 会询问目标设备。
-3. 接收端提示已收到的文件——点击可预览，用「分享」可继续转发；图片/视频会另存一份到系统相册。
+3. 接收端提示已收到的文件——点击可预览，用「分享」可继续转发；图片/视频直接落在系统相册里，不会再另存一份。
 
-记录：「已发送」和「已接收」各有一份列表，标题栏的「清空」可以一键清掉（清空已接收会连文件一起删，相册里的副本保留）。
+记录：「已发送」和「已接收」各有一份列表，标题栏的「清空」可以一键清掉（清空已接收会删掉下载的普通文件；已存入系统相册的图片/视频两端都保留，Android 上只是从列表移除——App 记住清空时间，把更早的相册条目过滤掉）。
 
 想让列表更好认：macOS 菜单栏 → **重命名本机**，iOS / Android 在「本机」卡片里重命名。别的设备就显示这个名字。
 
@@ -110,8 +110,8 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 | 本机名 | macOS 同一份配置；iOS `com.macdrop.mobile.deviceName`；Android `macdrop/device_name`（未设置时用主机名 / 机型名） |
 | 暂存 | `~/Library/Application Support/MoonDrop/.staging`（macOS）、应用沙盒（移动端） |
 | 传输日志 | `~/Library/Application Support/MoonDrop/logs/transfer.log` |
-| 收到的文件 | `~/Downloads/来自另一台Mac`（macOS）、`Download/来自另一台Mac`（Android）、`文件 → 我的 iPhone → MoonDrop → Received`（iOS） |
-| 收到的图片/视频 | 系统相册（iOS）、`Pictures/MoonDrop` 与 `Movies/MoonDrop`（Android） |
+| 收到的文件 | `~/Downloads/来自另一台Mac`（macOS）、`Download/来自另一台Mac`（Android，非媒体文件）、`文件 → 我的 iPhone → MoonDrop → Received`（iOS） |
+| 收到的图片/视频 | 系统相册（iOS）、`Pictures/MoonDrop` 与 `Movies/MoonDrop`（Android 默认落点，就是收到的那一份，不是副本） |
 
 ## 测试
 
@@ -156,3 +156,5 @@ tools/    图标生成脚本
 - iOS 挂起时会收回已发布的 Bonjour 记录，回到前台必须重新广播。
 - macOS 用稳定的 Apple Development 身份签名：ad-hoc 每次重装都会重置「本地网络」权限，届时设备列表正常但发送报 `NSURLError -1009`。
 - 分发 zip 而非 `.app` 目录，避免 AppleDouble 文件破坏签名。
+- Android 相册重复：`MediaStore` 的集合只是同一张表按 MIME 划分的视图，放在 `Download/` 里的 JPG 同样会被图库索引。别再「先存下载、再复制一份到 `Pictures/`」——在 `save()` 里一次性把媒体写进最终相册目录，并让已接收列表同时查询所有落点目录。
+- 清空不能删相册资产：Android 只删 `Downloads` 条目并记一个清空时间戳（秒），`Images` / `Video` 查询加 `DATE_ADDED > 清空时间`（时间戳回退 1 秒，避免同一秒新收的文件被永久隐藏）。旧照片留在系统相册，列表看起来是空的。
