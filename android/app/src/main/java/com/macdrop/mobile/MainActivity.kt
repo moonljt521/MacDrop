@@ -4,11 +4,13 @@ import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -19,14 +21,15 @@ import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.provider.Settings
 import android.text.InputType
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
-import android.widget.CheckBox
+import android.view.WindowInsetsController
 import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -42,39 +45,82 @@ import com.macdrop.mobile.store.MediaStoreStore
 import com.macdrop.mobile.store.ReceivedEntry
 import com.macdrop.mobile.store.SentRecord
 import com.macdrop.mobile.store.SentStore
+import com.macdrop.mobile.ui.MoonButton
+import com.macdrop.mobile.ui.MoonProgressView
+import com.macdrop.mobile.ui.MoonSegmented
+import com.macdrop.mobile.ui.MoonSheet
+import com.macdrop.mobile.ui.MoonSwitch
+import com.macdrop.mobile.ui.MoonUi
+import com.macdrop.mobile.ui.moonCard
+import com.macdrop.mobile.ui.moonDivider
+import com.macdrop.mobile.ui.moonEmptyState
+import com.macdrop.mobile.ui.moonIcon
+import com.macdrop.mobile.ui.moonIconButton
+import com.macdrop.mobile.ui.moonIconTile
+import com.macdrop.mobile.ui.moonPill
+import com.macdrop.mobile.ui.moonRippleBackground
+import com.macdrop.mobile.ui.moonRounded
+import com.macdrop.mobile.ui.moonSectionHeader
+import com.macdrop.mobile.ui.moonText
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlin.concurrent.thread
 
 class MainActivity : Activity() {
 
-    private lateinit var localName: TextView
-    private lateinit var localPort: TextView
-    private lateinit var netStatus: TextView
-    private lateinit var autoSaveGallery: CheckBox
-    private lateinit var batteryHint: TextView
-    private lateinit var peersContainer: LinearLayout
-    private lateinit var scanButton: Button
+    private lateinit var ui: MoonUi
+    private lateinit var scrollView: ScrollView
+
+    private lateinit var headerStatusHost: FrameLayout
+    private lateinit var heroName: TextView
+    private lateinit var heroMeta: TextView
+    private lateinit var heroStatusDot: View
+    private lateinit var heroStatusText: TextView
+    private lateinit var autoSaveSwitch: MoonSwitch
+    private lateinit var batteryValue: TextView
+    private lateinit var batteryRow: LinearLayout
+
     private lateinit var sendHint: TextView
-    private lateinit var sendFileButton: Button
-    private lateinit var sendAlbumButton: Button
+    private lateinit var sendFileButton: LinearLayout
+    private lateinit var sendAlbumButton: LinearLayout
+
+    private lateinit var peersContainer: LinearLayout
+    private lateinit var peersCount: TextView
+
     private lateinit var transferCard: LinearLayout
-    private lateinit var progressBar: ProgressBar
-    private lateinit var transferStatus: TextView
+    private lateinit var transferIcon: ImageView
+    private lateinit var transferTitle: TextView
+    private lateinit var transferPercent: TextView
+    private lateinit var transferProgress: MoonProgressView
+    private lateinit var transferDetail: TextView
+    private lateinit var transferWarn: TextView
+
     private lateinit var pendingCard: LinearLayout
     private lateinit var pendingTitle: TextView
-    private lateinit var pendingSendButton: Button
+    private lateinit var pendingSendButton: MoonButton
     private val pendingUris = mutableListOf<Uri>()
-    private lateinit var receivedContainer: LinearLayout
-    private lateinit var receivedHint: TextView
-    private lateinit var sentContainer: LinearLayout
-    private lateinit var sentHint: TextView
+
+    private lateinit var historySegmented: MoonSegmented
+    private lateinit var historyContainer: LinearLayout
+    private lateinit var historyClear: TextView
+    private var showReceivedHistory = true
+
+
+    private var targetPeer: Peer? = null
+    private var sendingName = ""
+    private var sendingLargeFile = false
+    private var displayResult = ""
+    private var displayResultTitle = ""
+    private var displayResultIsError = false
+    private var resultToken = 0
 
     private val sentRecords = mutableListOf<SentRecord>()
+    private val receivedItems = mutableListOf<ReceivedEntry>()
 
     private val discoveredPeers = mutableListOf<Peer>()
     private val manualPeers = mutableListOf<Peer>()
@@ -87,8 +133,6 @@ class MainActivity : Activity() {
 
     private var sending = false
     private var sendingProgress = 0.0
-    private var sendingText = ""
-    private var sendResult = ""
     private var lastReceiveResult = ""
     private var pendingInstall: ReceivedEntry? = null
     private var autoPickerArmed = false
@@ -162,297 +206,521 @@ class MainActivity : Activity() {
     // MARK: - UI 构建
 
     private fun buildUi() {
-        val scroll = ScrollView(this).apply {
+        ui = MoonUi(this)
+        val c = ui.colors
+
+        scrollView = ScrollView(this).apply {
             isFillViewport = true
-            setBackgroundColor(BG)
+            setBackgroundColor(c.canvas)
+            clipToPadding = true
         }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(24), dp(20), dp(32))
+            setPadding(ui.dp(20), ui.dp(8), ui.dp(20), ui.dp(28))
         }
-        scroll.addView(root)
+        scrollView.addView(root)
+        scrollView.setOnApplyWindowInsetsListener { view, insets ->
+            view.setPadding(
+                0,
+                insets.systemWindowInsetTop,
+                0,
+                insets.systemWindowInsetBottom + ui.dp(8)
+            )
+            insets
+        }
 
-        root.addView(TextView(this).apply {
-            text = "MoonDrop"
-            textSize = 30f
-            setTextColor(TEXT)
-            typeface = Typeface.DEFAULT_BOLD
+        // 顶部品牌栏
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        header.addView(moonIconTile(ui, R.drawable.ic_moon_moon, 40, 22, radiusDp = 13))
+        val brand = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        brand.addView(moonText(ui, "MoonDrop", 20f, c.textPrimary, ui.medium))
+        brand.addView(moonText(ui, "局域网互传 · 无需登录", 12f, c.textSecondary).apply {
+            setPadding(0, ui.dp(2), 0, 0)
         })
-        root.addView(TextView(this).apply {
-            text = "在局域网内与 Mac / 手机互传文件"
-            textSize = 13f
-            setTextColor(SECONDARY)
-            setPadding(0, dp(4), 0, dp(22))
+        header.addView(brand, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+            leftMargin = ui.dp(12)
         })
+        headerStatusHost = FrameLayout(this)
+        header.addView(headerStatusHost, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
+        root.addView(header)
 
-        root.addView(sectionTitle("本机"))
-        val localCard = card()
-        localName = TextView(this).apply {
-            textSize = 17f
-            setTextColor(TEXT)
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, 0, 0, dp(2))
+        // 本机
+        val localCard = moonCard(ui).apply {
+            layoutParams = blockParams(top = 18)
         }
-        localPort = TextView(this).apply {
-            textSize = 13f
-            setTextColor(SECONDARY)
-            setPadding(0, dp(3), 0, 0)
+        val localTop = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
-        netStatus = TextView(this).apply {
-            textSize = 12f
-            setTextColor(SECONDARY)
-            setPadding(0, dp(3), 0, 0)
+        localTop.addView(moonIconTile(ui, R.drawable.ic_moon_phone, 44, 22, radiusDp = 14))
+        val localNames = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        heroName = moonText(ui, "", 22f, c.textPrimary, ui.bold, maxLines = 1)
+        heroMeta = moonText(ui, "", 12f, c.textSecondary, maxLines = 1).apply {
+            setPadding(0, ui.dp(3), 0, 0)
         }
-        val renameButton = Button(this).apply {
-            text = "重命名本机…"
-            textSize = 13f
-            setTextColor(ACCENT)
-            background = null
-            gravity = Gravity.START
-            setPadding(0, dp(6), 0, 0)
-            setOnClickListener { showRenameDialog() }
+        localNames.addView(heroName)
+        localNames.addView(heroMeta)
+        localTop.addView(localNames, LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+        ).apply { leftMargin = ui.dp(12) })
+        localTop.addView(moonIconButton(ui, R.drawable.ic_moon_edit, "重命名本机") {
+            showRenameDialog()
+        })
+        localCard.addView(localTop)
+
+        val statusRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(ui.dp(4), ui.dp(10), ui.dp(4), ui.dp(10))
+            background = moonRippleBackground(ui, c.textSecondary)
+            isClickable = true
+            isFocusable = true
+            contentDescription = "连接详情"
+            setOnClickListener { showConnectionDetails() }
         }
-        autoSaveGallery = CheckBox(this).apply {
-            text = "收到图片/视频自动存入相册"
-            textSize = 13f
-            setTextColor(SECONDARY)
-            isChecked = GallerySettings.isEnabled(this@MainActivity)
-            setOnCheckedChangeListener { _, checked ->
-                GallerySettings.setEnabled(this@MainActivity, checked)
+        heroStatusDot = View(this).apply {
+            background = moonRounded(ui, c.textTertiary, 999)
+            layoutParams = LinearLayout.LayoutParams(ui.dp(6), ui.dp(6)).apply {
+                rightMargin = ui.dp(7)
             }
         }
-        batteryHint = TextView(this).apply {
-            textSize = 12f
-            setTextColor(ACCENT)
-            setPadding(0, dp(6), 0, 0)
+        heroStatusText = moonText(ui, "接收服务启动中…", 12f, c.textSecondary, maxLines = 1)
+        statusRow.addView(heroStatusDot)
+        statusRow.addView(heroStatusText, LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+        ))
+        statusRow.addView(moonIcon(ui, R.drawable.ic_moon_chevron, 16, c.textTertiary))
+        localCard.addView(statusRow)
+
+        localCard.addView(moonDivider(ui).apply {
+            (layoutParams as LinearLayout.LayoutParams).topMargin = ui.dp(6)
+        })
+
+        autoSaveSwitch = MoonSwitch(this, ui).apply {
+            setCheckedSilently(GallerySettings.isEnabled(this@MainActivity))
+            contentDescription = "收到的照片自动存入相册"
+            onCheckedChange = { GallerySettings.setEnabled(this@MainActivity, it) }
+        }
+        localCard.addView(settingRow("收到的照片自动存入相册", autoSaveSwitch))
+
+        localCard.addView(moonDivider(ui, 4))
+
+        batteryValue = moonText(ui, "去设置", 13f, c.primaryStrong)
+        batteryRow = settingRow("后台接收", LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(batteryValue)
+            addView(moonIcon(ui, R.drawable.ic_moon_chevron, 16, c.textTertiary).apply {
+                setPadding(ui.dp(4), 0, 0, 0)
+            })
+        }).apply {
+            background = moonRippleBackground(ui, c.textSecondary)
+            isClickable = true
+            isFocusable = true
             setOnClickListener { requestIgnoreBatteryOptimizations() }
         }
-        localCard.addView(localName)
-        localCard.addView(localPort)
-        localCard.addView(netStatus)
-        localCard.addView(renameButton)
-        localCard.addView(autoSaveGallery)
-        localCard.addView(batteryHint)
-        root.addView(localCard, cardParams())
+        localCard.addView(batteryRow)
+        root.addView(localCard)
 
-        root.addView(sectionTitle("附近的设备"))
-        val peersCard = card()
+        // 传输状态
+        transferCard = moonCard(ui).apply {
+            visibility = View.GONE
+            layoutParams = blockParams(top = 12)
+        }
+        val transferHead = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        transferIcon = moonIcon(ui, R.drawable.ic_moon_send, 22, c.primary)
+        transferTitle = moonText(ui, "正在发送", 13f, c.textSecondary, ui.medium, maxLines = 1)
+        transferPercent = moonText(ui, "0%", 24f, c.primaryStrong, ui.bold, maxLines = 1)
+        transferHead.addView(transferIcon)
+        transferHead.addView(transferTitle, LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+        ).apply { leftMargin = ui.dp(8) })
+        transferHead.addView(transferPercent)
+        transferCard.addView(transferHead)
+
+        transferProgress = MoonProgressView(this, ui)
+        transferCard.addView(transferProgress, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(6)
+        ).apply { topMargin = ui.dp(10) })
+
+        transferDetail = moonText(ui, "", 12f, c.textSecondary, maxLines = 2).apply {
+            setPadding(0, ui.dp(8), 0, 0)
+        }
+        transferCard.addView(transferDetail)
+
+        transferWarn = moonText(ui, "大文件传输中，请保持 MoonDrop 在前台", 12f, c.warningText, maxLines = 2)
+            .apply {
+                setPadding(0, ui.dp(6), 0, 0)
+                visibility = View.GONE
+            }
+        transferCard.addView(transferWarn)
+        root.addView(transferCard)
+
+        // 发送
+        root.addView(moonSectionHeader(ui, "发送"))
+        val sendRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+        sendFileButton = sendTile(true, R.drawable.ic_moon_file, "选择文件", "任意格式") {
+            pickFiles()
+        }
+        sendAlbumButton = sendTile(false, R.drawable.ic_moon_album, "从相册发送", "图片和视频") {
+            pickFromAlbum()
+        }
+        sendRow.addView(sendFileButton, LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+        ).apply { rightMargin = ui.dp(6) })
+        sendRow.addView(sendAlbumButton, LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+        ).apply { leftMargin = ui.dp(6) })
+        root.addView(sendRow)
+        sendHint = moonText(ui, "", 12f, c.textSecondary, maxLines = 2).apply {
+            setPadding(ui.dp(4), ui.dp(8), ui.dp(4), 0)
+        }
+        root.addView(sendHint)
+
+        // 附近设备
+        val peersTrailing = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        peersCount = moonText(ui, "", 12f, c.textSecondary).apply {
+            setPadding(0, 0, ui.dp(2), 0)
+        }
+        peersTrailing.addView(peersCount)
+        peersTrailing.addView(moonIconButton(ui, R.drawable.ic_moon_scan, "扫描局域网设备") {
+            scanSubnet()
+        })
+        peersTrailing.addView(moonIconButton(ui, R.drawable.ic_moon_plus, "手动添加设备") {
+            showManualDialog()
+        })
+        root.addView(moonSectionHeader(ui, "附近设备", peersTrailing))
+
+        val peersCard = moonCard(ui, paddingH = 4, paddingV = 4)
         peersContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         peersCard.addView(peersContainer)
-        scanButton = Button(this).apply {
-            text = "扫描局域网设备…"
-            textSize = 13f
-            setTextColor(ACCENT)
-            background = null
-            gravity = Gravity.START
-            setPadding(0, dp(8), 0, 0)
-            setOnClickListener { scanSubnet() }
-        }
-        peersCard.addView(scanButton)
-        peersCard.addView(Button(this).apply {
-            text = "手动添加设备…"
-            textSize = 13f
-            setTextColor(ACCENT)
-            background = null
-            gravity = Gravity.START
-            setPadding(0, dp(2), 0, 0)
-            setOnClickListener { showManualDialog() }
-        })
-        root.addView(peersCard, cardParams())
+        root.addView(peersCard)
 
-        pendingCard = card()
-        pendingCard.visibility = View.GONE
-        pendingTitle = TextView(this).apply {
-            textSize = 14f
-            setTextColor(TEXT)
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, 0, 0, dp(8))
+        // 待发送
+        pendingCard = moonCard(ui).apply {
+            visibility = View.GONE
+            background = moonRounded(ui, c.primaryTint, 18)
+            layoutParams = blockParams(top = 12)
         }
-        pendingSendButton = Button(this).apply {
+        val pendingHead = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        pendingHead.addView(moonIconTile(ui, R.drawable.ic_moon_send, 36, 18, radiusDp = 11))
+        pendingTitle = moonText(ui, "", 15f, c.textPrimary, ui.medium).apply {
+            setPadding(ui.dp(10), 0, 0, 0)
+        }
+        pendingHead.addView(pendingTitle, LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+        ))
+        pendingCard.addView(pendingHead)
+        val pendingActions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, ui.dp(12), 0, 0)
+        }
+        pendingSendButton = MoonButton(this, ui, MoonButton.Style.PRIMARY, "选择设备并发送").apply {
             setOnClickListener { sendPending() }
         }
-        val pendingCancel = Button(this).apply {
-            text = "取消"
+        pendingActions.addView(pendingSendButton, LinearLayout.LayoutParams(
+            0, ui.dp(48), 1f
+        ))
+        pendingActions.addView(MoonButton(this, ui, MoonButton.Style.GHOST, "取消").apply {
             setOnClickListener {
                 pendingUris.clear()
                 autoPickerArmed = false
                 updatePendingUi()
             }
-        }
-        pendingCard.addView(pendingTitle)
-        pendingCard.addView(pendingSendButton)
-        pendingCard.addView(pendingCancel)
-        root.addView(pendingCard, cardParams())
+        }, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ui.dp(48)
+        ).apply { leftMargin = ui.dp(8) })
+        pendingCard.addView(pendingActions)
+        root.addView(pendingCard)
 
-        root.addView(sectionTitle("发送"))
-        val sendCard = card()
-        sendHint = TextView(this).apply {
+        // 记录
+        historyClear = TextView(this).apply {
+            text = "清空"
             textSize = 13f
-            setTextColor(SECONDARY)
-            setPadding(0, 0, 0, dp(8))
+            setTextColor(c.primaryStrong)
+            typeface = ui.medium
+            setPadding(ui.dp(10), ui.dp(8), ui.dp(4), ui.dp(8))
+            background = moonRippleBackground(ui, c.primary)
+            isClickable = true
+            isFocusable = true
+            visibility = View.GONE
+            setOnClickListener {
+                if (showReceivedHistory) confirmClearReceived() else confirmClearSent()
+            }
         }
-        sendFileButton = Button(this).apply {
-            text = "选择文件发送"
-            setOnClickListener { pickFiles() }
-        }
-        sendAlbumButton = Button(this).apply {
-            text = "从相册发送"
-            setOnClickListener { pickFromAlbum() }
-        }
-        sendCard.addView(sendHint)
-        sendCard.addView(sendFileButton)
-        sendCard.addView(sendAlbumButton)
-        root.addView(sendCard, cardParams())
+        root.addView(moonSectionHeader(ui, "记录", historyClear))
 
-        transferCard = card()
-        transferCard.visibility = View.GONE
-        progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 100
-            progress = 0
+        historySegmented = MoonSegmented(
+            this, ui, listOf("已发送", "已接收"), initial = 1
+        ) { index ->
+            showReceivedHistory = index == 1
+            renderHistory()
         }
-        transferStatus = TextView(this).apply {
-            textSize = 13f
-            setTextColor(SECONDARY)
-            setPadding(0, dp(6), 0, 0)
-        }
-        transferCard.addView(progressBar)
-        transferCard.addView(transferStatus)
-        root.addView(transferCard, cardParams())
+        root.addView(historySegmented, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(36)
+        ).apply { bottomMargin = ui.dp(10) })
 
-        root.addView(sectionTitle("已发送"))
-        val sentCard = card()
-        sentHint = TextView(this).apply {
-            text = "暂无发送记录"
-            textSize = 13f
-            setTextColor(SECONDARY)
-            setPadding(0, dp(2), 0, dp(4))
+        val historyCard = moonCard(ui, paddingH = 4, paddingV = 4)
+        historyContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        historyCard.addView(historyContainer)
+        root.addView(historyCard)
+
+        // 帮助入口
+        val helpRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(ui.dp(4), ui.dp(10), ui.dp(4), ui.dp(10))
+            background = moonRippleBackground(ui, c.textSecondary)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { showHelp() }
         }
-        sentContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        sentCard.addView(sentHint)
-        sentCard.addView(sentContainer)
-        sentCard.addView(Button(this).apply {
-            text = "清空发送记录"
-            textSize = 13f
-            setTextColor(ACCENT)
-            background = null
-            gravity = Gravity.START
-            setPadding(0, dp(6), 0, 0)
-            setOnClickListener { confirmClearSent() }
+        helpRow.addView(moonIconTile(ui, R.drawable.ic_moon_info, 36, 18, radiusDp = 11))
+        val helpColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(ui.dp(10), 0, 0, 0)
+        }
+        helpColumn.addView(moonText(ui, "存储位置与常见问题", 15f, c.textPrimary, ui.medium))
+        helpColumn.addView(moonText(ui, "文件保存在哪、看不见设备怎么办", 12f, c.textSecondary).apply {
+            setPadding(0, ui.dp(2), 0, 0)
         })
-        root.addView(sentCard, cardParams())
-
-        root.addView(sectionTitle("已接收"))
-        val receivedCard = card()
-        receivedHint = TextView(this).apply {
-            text = "暂无接收文件"
-            textSize = 13f
-            setTextColor(SECONDARY)
-        }
-        receivedContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        receivedCard.addView(receivedHint)
-        receivedCard.addView(receivedContainer)
-        receivedCard.addView(Button(this).apply {
-            text = "清空已接收（会删除文件）"
-            textSize = 13f
-            setTextColor(ACCENT)
-            background = null
-            gravity = Gravity.START
-            setPadding(0, dp(6), 0, 0)
-            setOnClickListener { confirmClearReceived() }
-        })
-        root.addView(receivedCard, cardParams())
-
-        root.addView(TextView(this).apply {
-            text = "收到的文件保存在「下载 / 来自另一台Mac」，图片和视频会另存一份到相册（可在「本机」里关闭）。" +
-                "接收服务在前台通知中运行，切到后台也能继续接收。"
-            textSize = 12f
-            setTextColor(SECONDARY)
-            setPadding(0, dp(2), 0, 0)
+        helpRow.addView(helpColumn, LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+        ))
+        helpRow.addView(moonIcon(ui, R.drawable.ic_moon_chevron, 16, c.textTertiary))
+        root.addView(moonCard(ui, paddingH = 10, paddingV = 6).apply {
+            layoutParams = blockParams(top = 12)
+            addView(helpRow)
         })
 
-        setContentView(scroll)
+        root.addView(moonText(ui, "MoonDrop · 局域网直连，不经过云端", 12f, c.textSecondary).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, ui.dp(20), 0, 0)
+        })
+
+        setContentView(scrollView)
+        applyEdgeToEdge()
+        updateBatteryHint()
         refreshPeers()
+        renderHistory()
     }
 
-    private fun card(): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        background = GradientDrawable().apply {
-            setColor(Color.WHITE)
-            cornerRadius = dp(16).toFloat()
-        }
-        setPadding(dp(16), dp(14), dp(16), dp(14))
-        elevation = dp(1).toFloat()
-    }
-
-    private fun cardParams() = LinearLayout.LayoutParams(
+    private fun blockParams(top: Int = 0, bottom: Int = 0) = LinearLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
         ViewGroup.LayoutParams.WRAP_CONTENT
-    ).apply { bottomMargin = dp(18) }
+    ).apply {
+        topMargin = ui.dp(top)
+        bottomMargin = ui.dp(bottom)
+    }
 
-    private fun sectionTitle(text: String): TextView = TextView(this).apply {
-        this.text = text
-        textSize = 12f
-        setTextColor(SECONDARY)
-        letterSpacing = 0.08f
-        setPadding(dp(4), 0, 0, dp(7))
+    private fun settingRow(title: String, trailing: View): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = ui.dp(56)
+            setPadding(ui.dp(4), 0, 0, 0)
+            addView(
+                moonText(ui, title, 15f, ui.colors.textPrimary, maxLines = 1),
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            )
+            addView(trailing)
+        }
+
+    private fun sendTile(
+        primary: Boolean,
+        iconRes: Int,
+        title: String,
+        subtitle: String,
+        onClick: () -> Unit
+    ): LinearLayout {
+        val c = ui.colors
+        val titleColor = if (primary) c.onPrimary else c.primaryStrong
+        val subColor = if (primary) ui.alpha(c.onPrimary, 0.75f) else c.textSecondary
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.START
+            minimumHeight = ui.dp(96)
+            setPadding(ui.dp(14), ui.dp(14), ui.dp(14), ui.dp(14))
+            background = moonRounded(ui, if (primary) c.primary else c.primaryTint, 16)
+            foreground = moonRippleBackground(
+                ui, if (primary) Color.WHITE else c.primary
+            )
+            isClickable = true
+            isFocusable = true
+            addView(moonIcon(ui, iconRes, 24, titleColor))
+            addView(moonText(ui, title, 15f, titleColor, ui.medium).apply {
+                setPadding(0, ui.dp(10), 0, 0)
+            })
+            addView(moonText(ui, subtitle, 12f, subColor).apply {
+                setPadding(0, ui.dp(2), 0, 0)
+            })
+            setOnClickListener { onClick() }
+        }
+    }
+
+    private fun applyEdgeToEdge() {
+        val c = ui.colors
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false)
+            val light = if (ui.isDark) 0 else (
+                WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+                    WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                )
+            window.insetsController?.setSystemBarsAppearance(
+                light,
+                WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+                    WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility =
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                (if (ui.isDark) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR) or
+                (if (ui.isDark) 0 else View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR)
+        }
+        window.navigationBarDividerColor = c.divider
+    }
+
+    private fun renderStatusChrome(port: Int, addresses: List<String>) {
+        val c = ui.colors
+        val online = port > 0 && addresses.isNotEmpty() && ReceiverRuntime.advertising
+        val (label, color) = when {
+            port <= 0 -> "启动中" to c.textTertiary
+            addresses.isEmpty() -> "未连接局域网" to c.warning
+            ReceiverRuntime.advertising -> "在线" to c.success
+            else -> "广播未上线" to c.warning
+        }
+        headerStatusHost.removeAllViews()
+        headerStatusHost.addView(moonPill(
+            ui,
+            label,
+            if (online) c.successText else c.textSecondary,
+            if (online) c.successTint else c.surfaceMuted,
+            dotColor = color
+        ))
+        heroStatusDot.background = moonRounded(ui, color, 999)
+        heroStatusText.text = when {
+            port <= 0 -> "接收服务启动中…"
+            addresses.isEmpty() -> "未连接局域网，点此查看"
+            ReceiverRuntime.advertising -> "在线 · 其他设备可以看到本机"
+            else -> "广播未上线，点此查看"
+        }
+        heroStatusText.setTextColor(if (online) c.textSecondary else c.warningText)
     }
 
     // MARK: - 状态刷新
 
     private fun refreshRuntime() {
+        if (!::heroName.isInitialized) return
         val port = ReceiverRuntime.port
-        localName.text = DeviceIdentity.name(this)
-        localPort.text = if (port > 0) "监听端口 $port" else "接收服务启动中…"
-        netStatus.text = networkSummary(port)
+        val addresses = SubnetScan.localIPv4s()
+        heroName.text = DeviceIdentity.name(this)
+        heroMeta.text = if (port > 0) {
+            "端口 $port · " + (addresses.firstOrNull() ?: "未连接局域网")
+        } else {
+            "接收服务启动中…"
+        }
+        renderStatusChrome(port, addresses)
         if (port > 0 && screenVisible) startDiscovery(port)
 
         if (ReceiverRuntime.lastResult.isNotEmpty() &&
             ReceiverRuntime.lastResult != lastReceiveResult
         ) {
             lastReceiveResult = ReceiverRuntime.lastResult
+            val error = lastReceiveResult.contains("失败") || lastReceiveResult.contains("拒绝")
+            showResult(
+                lastReceiveResult,
+                error,
+                if (error) "接收失败" else "接收完成"
+            )
             refreshReceived()
         }
         refreshTransferUi()
     }
 
-    /// 互相看不见时先看这一行：是本机没地址，还是广播没上线
+    /// 连接详情弹层用：把「没地址」和「广播没上线」分开说清楚
     private fun networkSummary(port: Int): String {
-        if (port <= 0) return "接收服务启动中…"
+        if (port <= 0) return "接收服务还在启动，请稍等"
         val addresses = SubnetScan.localIPv4s()
         val addressPart = if (addresses.isEmpty()) {
-            "未取得局域网地址（未连 Wi-Fi？）"
+            "未取得局域网地址，请确认已连接 Wi-Fi"
         } else {
             addresses.joinToString(", ")
         }
-        val advertisePart = if (ReceiverRuntime.advertising) {
-            "广播已上线"
-        } else if (ReceiverRuntime.advertiseError.isNotEmpty()) {
-            ReceiverRuntime.advertiseError
-        } else {
-            "广播未确认（系统没回调），可改用扫描或手动填 IP"
+        val advertisePart = when {
+            ReceiverRuntime.advertising -> "广播已上线"
+            ReceiverRuntime.advertiseError.isNotEmpty() -> ReceiverRuntime.advertiseError
+            else -> "广播未确认，可改用扫描或手动填写 IP"
         }
-        return "$addressPart · $advertisePart"
+        return "$addressPart\n$advertisePart"
     }
 
-    private fun showRenameDialog() {
-        val input = EditText(this).apply {
-            hint = "例如 客厅的安卓机"
-            setText(DeviceIdentity.name(this@MainActivity))
+    private fun sheetInput(hint: String, value: String = ""): EditText =
+        EditText(this).apply {
+            this.hint = hint
+            setText(value)
             setSelection(editableText.length)
+            textSize = 15f
+            setTextColor(ui.colors.textPrimary)
+            setHintTextColor(ui.colors.textTertiary)
             inputType = InputType.TYPE_CLASS_TEXT
-            filters = arrayOf(android.text.InputFilter.LengthFilter(DeviceIdentity.MAX_NAME_LENGTH))
+            setPadding(ui.dp(14), ui.dp(12), ui.dp(14), ui.dp(12))
+            background = moonRounded(ui, ui.colors.surfaceMuted, 12)
+            includeFontPadding = false
         }
-        val container = LinearLayout(this).apply {
+
+    private fun sheetPrimaryButton(text: String, onClick: () -> Unit): LinearLayout =
+        LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(8), dp(20), 0)
-            addView(input)
+            setPadding(0, ui.dp(16), 0, 0)
+            addView(MoonButton(this@MainActivity, ui, MoonButton.Style.PRIMARY, text).apply {
+                setOnClickListener { onClick() }
+            }, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(48)
+            ))
         }
-        AlertDialog.Builder(this)
-            .setTitle("重命名本机")
-            .setView(container)
-            .setPositiveButton("保存") { _, _ -> renameDevice(input.text.toString()) }
-            .setNegativeButton("取消", null)
-            .show()
+
+    private fun showRenameDialog() {
+        val sheet = MoonSheet(this, ui, "重命名本机")
+        val input = sheetInput("例如 客厅的安卓机", DeviceIdentity.name(this)).apply {
+            filters = arrayOf(
+                android.text.InputFilter.LengthFilter(DeviceIdentity.MAX_NAME_LENGTH)
+            )
+        }
+        sheet.add(input)
+        sheet.add(moonText(
+            ui,
+            "其他设备的 MoonDrop 列表里显示这个名字，最长 ${DeviceIdentity.MAX_NAME_LENGTH} 个字符。",
+            12f,
+            ui.colors.textSecondary
+        ).apply { setPadding(0, ui.dp(8), 0, 0) })
+        sheet.add(sheetPrimaryButton("保存") {
+            renameDevice(input.text.toString())
+            sheet.dismiss()
+        })
+        sheet.show()
+        input.requestFocus()
     }
 
     private fun renameDevice(raw: String) {
@@ -470,12 +738,9 @@ class MainActivity : Activity() {
     private fun scanSubnet() {
         if (scanning) return
         scanning = true
-        scanButton.isEnabled = false
-        scanButton.text = "扫描局域网中…"
+        if (::peersCount.isInitialized) peersCount.text = "扫描中…"
         SubnetScan.run { found ->
             scanning = false
-            scanButton.isEnabled = true
-            scanButton.text = "扫描局域网设备…"
             if (isFinishing || isDestroyed) return@run
             for (hit in found) {
                 val peer = Peer(name = hit.name, host = hit.host, port = hit.port, manual = true)
@@ -492,100 +757,163 @@ class MainActivity : Activity() {
     }
 
     private fun refreshTransferUi() {
+        if (!::transferCard.isInitialized) return
         when {
-            ReceiverRuntime.receiving -> {
-                transferCard.visibility = View.VISIBLE
-                progressBar.progress = (ReceiverRuntime.progress * 100).toInt()
-                transferStatus.text = ReceiverRuntime.statusText
-            }
-            sending -> {
-                transferCard.visibility = View.VISIBLE
-                progressBar.progress = (sendingProgress * 100).toInt()
-                transferStatus.text = sendingText
-            }
-            ReceiverRuntime.lastResult.isNotEmpty() -> {
-                transferCard.visibility = View.VISIBLE
-                progressBar.progress = 100
-                transferStatus.text = ReceiverRuntime.lastResult
-            }
-            sendResult.isNotEmpty() -> {
-                transferCard.visibility = View.VISIBLE
-                progressBar.progress = 100
-                transferStatus.text = sendResult
-            }
+            sending -> bindActiveTransfer(outgoing = true)
+            ReceiverRuntime.receiving -> bindActiveTransfer(outgoing = false)
+            displayResult.isNotEmpty() -> bindResultTransfer()
             else -> transferCard.visibility = View.GONE
         }
         refreshSendState()
     }
 
-    private fun refreshPeers() {
-        val peers = mergedPeers()
+    private fun bindActiveTransfer(outgoing: Boolean) {
+        val c = ui.colors
+        transferCard.visibility = View.VISIBLE
+        transferIcon.setImageResource(
+            if (outgoing) R.drawable.ic_moon_send else R.drawable.ic_moon_download
+        )
+        transferIcon.setColorFilter(c.primary)
+        transferTitle.text = if (outgoing) "正在发送" else "正在接收"
+        transferTitle.setTextColor(c.textSecondary)
+        val progress = if (outgoing) sendingProgress else ReceiverRuntime.progress
+        transferPercent.visibility = View.VISIBLE
+        transferPercent.text = "${(progress * 100).toInt()}%"
+        transferPercent.setTextColor(c.primaryStrong)
+        transferProgress.setProgress(progress.toFloat())
+        transferDetail.text = if (outgoing) {
+            sendingName.ifEmpty { "准备发送…" }
+        } else {
+            ReceiverRuntime.statusText.substringAfter("· ", "").ifEmpty { "接收中…" }
+        }
+        transferWarn.visibility =
+            if (outgoing && sendingLargeFile) View.VISIBLE else View.GONE
+    }
 
+    private fun bindResultTransfer() {
+        val c = ui.colors
+        transferCard.visibility = View.VISIBLE
+        transferIcon.setImageResource(
+            if (displayResultIsError) R.drawable.ic_moon_error else R.drawable.ic_moon_check_circle
+        )
+        transferIcon.setColorFilter(if (displayResultIsError) c.danger else c.success)
+        transferTitle.text = displayResultTitle
+        transferTitle.setTextColor(
+            if (displayResultIsError) c.dangerText else c.successText
+        )
+        transferPercent.visibility = View.GONE
+        transferProgress.setProgress(if (displayResultIsError) 0f else 1f)
+        transferDetail.text = displayResult
+        transferWarn.visibility = View.GONE
+    }
+
+    private fun showResult(text: String, error: Boolean, title: String) {
+        displayResult = text
+        displayResultIsError = error
+        displayResultTitle = title
+        val token = ++resultToken
+        handler.postDelayed({
+            if (token == resultToken) {
+                displayResult = ""
+                refreshTransferUi()
+            }
+        }, if (error) 8_000L else 5_000L)
+        refreshTransferUi()
+    }
+
+    private fun refreshPeers() {
+        if (!::peersContainer.isInitialized) return
+        val peers = mergedPeers()
+        peersCount.text = if (peers.isEmpty()) "" else "${peers.size} 台"
         peersContainer.removeAllViews()
         if (peers.isEmpty()) {
-            peersContainer.addView(TextView(this).apply {
-                text = "未发现设备。确认对端已打开 MoonDrop，并处于同一 Wi-Fi；" +
-                    "仍看不见就用下面的「扫描局域网设备」或手动填 IP。" +
-                    "Android 设备必须同一 Wi-Fi，Apple 设备在附近即使连着别的 Wi-Fi 也能以「点对点」出现。"
-                textSize = 13f
-                setTextColor(SECONDARY)
-                setPadding(0, dp(4), 0, dp(4))
-            })
+            peersContainer.addView(moonEmptyState(
+                ui,
+                R.drawable.ic_moon_scan,
+                "还没有发现设备",
+                "打开对端 MoonDrop，并连到同一个 Wi-Fi。仍看不见就扫描或手动添加。",
+                "扫描局域网"
+            ) { scanSubnet() })
         } else {
             peers.forEachIndexed { index, peer ->
-                if (index > 0) {
-                    peersContainer.addView(View(this).apply {
-                        setBackgroundColor(DIVIDER)
-                        layoutParams = LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT, dp(1)
-                        )
-                    })
-                }
-                peersContainer.addView(peerRow(peer))
+                if (index > 0) peersContainer.addView(moonDivider(ui, 56))
+                peersContainer.addView(deviceRow(peer) { showSendOptions(peer) })
             }
         }
         refreshSendState()
     }
 
-    private fun peerRow(peer: Peer): View {
+    private fun deviceRow(peer: Peer, onClick: () -> Unit): LinearLayout {
+        val c = ui.colors
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10), dp(11), dp(10), dp(11))
+            minimumHeight = ui.dp(64)
+            setPadding(ui.dp(10), ui.dp(8), ui.dp(10), ui.dp(8))
+            background = moonRippleBackground(ui, c.textSecondary)
+            isClickable = true
+            isFocusable = true
+            contentDescription = "${peer.name}，${peer.host}:${peer.port}，点按发送文件"
+            setOnClickListener { onClick() }
         }
-
-        val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        column.addView(TextView(this).apply {
-            text = if (peer.peerToPeer) "${peer.name} · 点对点" else peer.name
-            textSize = 15f
-            setTextColor(TEXT)
-            typeface = Typeface.DEFAULT_BOLD
-        })
-        column.addView(TextView(this).apply {
-            val route = when {
-                peer.peerToPeer -> "直连，不在同一 Wi-Fi"
-                peer.manual -> "手动"
-                else -> ""
-            }
-            val address = "${peer.host}:${peer.port}"
-            text = if (route.isEmpty()) address else "$route · $address"
-            textSize = 12f
-            setTextColor(if (peer.peerToPeer) ACCENT else SECONDARY)
-        })
-        row.addView(column, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(moonIconTile(
+            ui,
+            if (peer.manual) R.drawable.ic_moon_link else R.drawable.ic_moon_device,
+            40,
+            20
+        ))
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(ui.dp(12), 0, ui.dp(8), 0)
+        }
+        val nameRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        nameRow.addView(moonText(ui, peer.name, 15f, c.textPrimary, ui.medium, maxLines = 1))
+        if (peer.peerToPeer) {
+            nameRow.addView(moonText(ui, "点对点", 12f, c.warningText, ui.medium).apply {
+                background = moonRounded(ui, c.warningTint, 6)
+                setPadding(ui.dp(6), ui.dp(2), ui.dp(6), ui.dp(2))
+            }, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { leftMargin = ui.dp(6) })
+        }
+        column.addView(nameRow)
+        val route = when {
+            peer.peerToPeer -> "直连，不在同一 Wi-Fi"
+            peer.manual -> "手动添加"
+            else -> null
+        }
+        val address = "${peer.host}:${peer.port}"
+        column.addView(moonText(
+            ui,
+            if (route == null) address else "$route · $address",
+            12f,
+            c.textSecondary,
+            maxLines = 1
+        ).apply { setPadding(0, ui.dp(2), 0, 0) })
+        row.addView(column, LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+        ))
+        row.addView(moonIcon(ui, R.drawable.ic_moon_chevron, 16, c.textTertiary))
         return row
     }
 
     private fun refreshSendState() {
+        if (!::sendFileButton.isInitialized) return
         val peers = mergedPeers()
-        sendHint.text = if (peers.isEmpty()) {
-            "没有可用设备"
-        } else {
-            "选择文件后会让你选择目标设备"
+        sendHint.text = when {
+            sending -> "正在传输，请稍候"
+            peers.isEmpty() -> "先连接一台设备才能发送"
+            else -> "选完文件后会让你确认目标设备，也可以直接点设备发送"
         }
         val enabled = peers.isNotEmpty() && !sending
-        sendFileButton.isEnabled = enabled
-        sendAlbumButton.isEnabled = enabled
+        for (tile in listOf(sendFileButton, sendAlbumButton)) {
+            tile.isEnabled = enabled
+            tile.isClickable = enabled
+            tile.alpha = if (enabled) 1f else 0.4f
+        }
         updatePendingUi()
     }
 
@@ -631,15 +959,17 @@ class MainActivity : Activity() {
 
     /// 锁屏后收不到文件，通常是系统的电池优化把前台服务冻结了。
     private fun updateBatteryHint() {
-        if (!::batteryHint.isInitialized) return
+        if (!::batteryValue.isInitialized) return
         val ignoring = isIgnoringBatteryOptimizations()
-        batteryHint.text = if (ignoring) {
-            "后台接收：已允许（电池优化已关闭）"
+        batteryValue.text = if (ignoring) "已允许" else "去设置"
+        batteryValue.setTextColor(
+            if (ignoring) ui.colors.textSecondary else ui.colors.primaryStrong
+        )
+        batteryRow.contentDescription = if (ignoring) {
+            "后台接收，电池优化已关闭"
         } else {
-            "后台接收：点此关闭电池优化，锁屏后也能收到文件"
+            "后台接收，点按关闭电池优化"
         }
-        batteryHint.setTextColor(if (ignoring) SECONDARY else ACCENT)
-        batteryHint.isClickable = !ignoring
     }
 
     private fun isIgnoringBatteryOptimizations(): Boolean =
@@ -705,8 +1035,7 @@ class MainActivity : Activity() {
             return
         }
         pendingCard.visibility = View.VISIBLE
-        pendingTitle.text = "待发送 ${pendingUris.size} 个文件，尚未发送"
-        pendingSendButton.text = "选择设备并发送"
+        pendingTitle.text = "${pendingUris.size} 个文件待发送"
         pendingSendButton.isEnabled = mergedPeers().isNotEmpty() && !sending
     }
 
@@ -714,6 +1043,133 @@ class MainActivity : Activity() {
         if (pendingUris.isEmpty() || sending) return
         prepareAndSend(pendingUris.toList(), fromPending = true)
     }
+
+    private fun showSendOptions(peer: Peer) {
+        if (sending) {
+            toast("正在传输，请稍候")
+            return
+        }
+        val sheet = MoonSheet(this, ui, "发送到 ${peer.name}")
+        sheet.add(moonText(
+            ui,
+            "${peer.host}:${peer.port}" + if (peer.peerToPeer) " · 点对点直连" else "",
+            12f,
+            ui.colors.textSecondary
+        ).apply { setPadding(0, 0, 0, ui.dp(4)) })
+        sheet.addAction(R.drawable.ic_moon_file, "选择文件") {
+            targetPeer = peer
+            sheet.dismiss()
+            pickFiles()
+        }
+        sheet.addAction(R.drawable.ic_moon_album, "从相册发送") {
+            targetPeer = peer
+            sheet.dismiss()
+            pickFromAlbum()
+        }
+        sheet.show()
+    }
+
+    private fun takeTargetPeer(): Peer? {
+        val peer = targetPeer
+        targetPeer = null
+        return peer
+    }
+
+    private fun showConnectionDetails() {
+        val port = ReceiverRuntime.port
+        val addresses = SubnetScan.localIPv4s()
+        val sheet = MoonSheet(this, ui, "连接详情")
+        sheet.add(infoRow("本机名称", DeviceIdentity.name(this)))
+        sheet.add(infoRow("监听端口", if (port > 0) port.toString() else "启动中"))
+        sheet.add(infoRow(
+            "局域网地址",
+            addresses.joinToString(", ").ifEmpty { "未连接 Wi-Fi" }
+        ))
+        sheet.add(infoRow(
+            "广播状态",
+            when {
+                ReceiverRuntime.advertising -> "已上线"
+                ReceiverRuntime.advertiseError.isNotEmpty() -> "失败"
+                else -> "未确认"
+            }
+        ))
+        sheet.add(moonText(
+            ui,
+            networkSummary(port),
+            13f,
+            ui.colors.textSecondary
+        ).apply {
+            setPadding(0, ui.dp(10), 0, 0)
+            setLineSpacing(ui.dpf(3f), 1f)
+        })
+        sheet.add(sheetPrimaryButton("复制地址") {
+            val address = addresses.firstOrNull()
+            if (address == null) {
+                toast("还没有局域网地址")
+            } else {
+                copyText("$address:${if (port > 0) port else 52345}")
+                toast("已复制地址")
+            }
+        })
+        sheet.show()
+    }
+
+    private fun infoRow(label: String, value: String): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, ui.dp(8), 0, ui.dp(8))
+            addView(moonText(ui, label, 13f, ui.colors.textSecondary))
+            addView(moonText(ui, value, 13f, ui.colors.textPrimary, ui.medium, maxLines = 2).apply {
+                gravity = Gravity.END
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+
+    private fun copyText(text: String) {
+        getSystemService(ClipboardManager::class.java)
+            ?.setPrimaryClip(ClipData.newPlainText("MoonDrop", text))
+    }
+
+    private fun showHelp() {
+        val version = try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: ""
+        } catch (_: Exception) {
+            ""
+        }
+        val sheet = MoonSheet(this, ui, "存储位置与常见问题")
+        sheet.add(helpHeading("收到的文件放在哪"))
+        sheet.add(helpBody(
+            "普通文件保存在「下载 / 来自另一台Mac」。\n\n" +
+                "开关开启时，图片和视频直接写入「Pictures / MoonDrop」或「Movies / MoonDrop」，" +
+                "只保存一份，相册里不会出现重复。关闭开关后媒体留在下载目录，" +
+                "可以在记录里点「⋯ → 存入相册」。"
+        ))
+        sheet.add(helpHeading("看不见设备怎么办"))
+        sheet.add(helpBody(
+            "确认双方都打开了 MoonDrop，并连在同一个 Wi-Fi。Android 设备必须同一 Wi-Fi；" +
+                "附近的 Apple 设备即使连着别的网络，也会以「点对点」出现。\n\n" +
+                "仍然看不见就扫描局域网，或手动填写对方的 IP 和端口 52345。"
+        ))
+        sheet.add(helpHeading("后台接收"))
+        sheet.add(helpBody(
+            "接收服务在前台通知里运行，切到后台也能继续接收。关闭电池优化可以减少锁屏后被系统冻结的情况。"
+        ))
+        sheet.add(helpHeading("关于"))
+        sheet.add(helpBody(
+            "MoonDrop ${version.ifEmpty { "1.6.0" }} · 局域网直连，不经过云端。"
+        ))
+        sheet.show()
+    }
+
+    private fun helpHeading(text: String): TextView =
+        moonText(ui, text, 13f, ui.colors.primaryStrong, ui.medium).apply {
+            setPadding(0, ui.dp(16), 0, ui.dp(4))
+        }
+
+    private fun helpBody(text: String): TextView =
+        moonText(ui, text, 13f, ui.colors.textSecondary).apply {
+            setLineSpacing(ui.dpf(3f), 1f)
+        }
 
     private fun mergedPeers(): List<Peer> {
         val map = LinkedHashMap<String, Peer>()
@@ -751,39 +1207,34 @@ class MainActivity : Activity() {
     // MARK: - 手动添加
 
     private fun showManualDialog() {
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(8), dp(20), 0)
-        }
-        val hostInput = EditText(this).apply {
-            hint = "IP 地址，例如 192.168.1.20"
-            inputType = InputType.TYPE_CLASS_TEXT
-        }
-        val portInput = EditText(this).apply {
-            hint = "端口"
-            setText("52345")
+        val sheet = MoonSheet(this, ui, "手动添加设备")
+        val hostInput = sheetInput("IP 地址，例如 192.168.1.20")
+        val portInput = sheetInput("端口", "52345").apply {
             inputType = InputType.TYPE_CLASS_NUMBER
         }
-        val nameInput = EditText(this).apply { hint = "备注名（可选）" }
-        layout.addView(hostInput)
-        layout.addView(portInput)
-        layout.addView(nameInput)
-
-        AlertDialog.Builder(this)
-            .setTitle("手动添加设备")
-            .setView(layout)
-            .setPositiveButton("连接") { _, _ ->
-                val host = hostInput.text.toString().trim()
-                val port = portInput.text.toString().toIntOrNull() ?: 52345
-                val name = nameInput.text.toString().trim()
-                if (host.isEmpty()) {
-                    toast("请填写 IP 地址")
-                } else {
-                    connectManual(host, port, name)
-                }
+        val nameInput = sheetInput("备注名（可选）")
+        sheet.add(hostInput)
+        sheet.add(portInput)
+        sheet.add(nameInput)
+        sheet.add(moonText(
+            ui,
+            "对端需运行 MoonDrop（Mac / iPhone / Android），并与本机在同一局域网。",
+            12f,
+            ui.colors.textSecondary
+        ).apply { setPadding(0, ui.dp(10), 0, 0) })
+        sheet.add(sheetPrimaryButton("连接") {
+            val host = hostInput.text.toString().trim()
+            val port = portInput.text.toString().toIntOrNull() ?: 52345
+            val name = nameInput.text.toString().trim()
+            if (host.isEmpty()) {
+                toast("请填写 IP 地址")
+            } else {
+                sheet.dismiss()
+                connectManual(host, port, name)
             }
-            .setNegativeButton("取消", null)
-            .show()
+        })
+        sheet.show()
+        hostInput.requestFocus()
     }
 
     private fun connectManual(host: String, port: Int, name: String) {
@@ -847,7 +1298,10 @@ class MainActivity : Activity() {
         com.macdrop.mobile.net.MobileLog.write(
             "选择返回 req=$requestCode result=$resultCode hasData=${data != null}"
         )
-        if (resultCode != RESULT_OK) return
+        if (resultCode != RESULT_OK) {
+            targetPeer = null
+            return
+        }
 
         when (requestCode) {
             REQ_FILES -> {
@@ -858,7 +1312,7 @@ class MainActivity : Activity() {
                 data?.data?.let { uri -> if (uris.isEmpty()) uris.add(uri) }
                 if (uris.isNotEmpty()) {
                     persistPermissions(uris)
-                    prepareAndSend(uris)
+                    prepareAndSend(uris, target = takeTargetPeer())
                 }
             }
 
@@ -869,7 +1323,7 @@ class MainActivity : Activity() {
                 }
                 data?.data?.let { uri -> if (uris.isEmpty()) uris.add(uri) }
                 if (uris.isNotEmpty()) {
-                    prepareAndSend(uris)
+                    prepareAndSend(uris, target = takeTargetPeer())
                 }
             }
         }
@@ -886,13 +1340,19 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun prepareAndSend(uris: List<Uri>, fromPending: Boolean = false) {
+    private fun prepareAndSend(
+        uris: List<Uri>,
+        fromPending: Boolean = false,
+        target: Peer? = null
+    ) {
         thread(name = "macdrop-prepare") {
             try {
                 val files = uris.mapNotNull { resolveFile(it) }
                 runOnUiThread {
                     if (files.isEmpty()) {
                         toast("没有可发送的文件")
+                    } else if (target != null) {
+                        startSend(files, target)
                     } else {
                         presentDeviceChooser(
                             files,
@@ -936,29 +1396,38 @@ class MainActivity : Activity() {
             return
         }
 
-        val labels = peers.map { "${it.name}  (${it.host}:${it.port})" }.toTypedArray()
+        val sheet = MoonSheet(this, ui, "发送到哪台设备？")
         var picked = false
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("发送到哪台设备？")
-            .setItems(labels) { _, which ->
+        peers.forEachIndexed { index, peer ->
+            if (index > 0) sheet.add(moonDivider(ui, 56))
+            sheet.add(deviceRow(peer) {
                 picked = true
                 if (fromPending) {
-                    // 只移除本次真正发送的，弹窗期间新分享进来的文件继续保留
+                    // 只移除本次真正发送的，弹层期间新分享进来的文件继续保留
                     val sent = restoreUris.toSet()
                     pendingUris.removeAll { it in sent }
                     updatePendingUi()
                 }
-                startSend(files, peers[which], restoreUris)
-            }
-            .setNegativeButton("取消", null)
-            .create()
-        dialog.setOnDismissListener {
+                sheet.dismiss()
+                startSend(files, peer, restoreUris)
+            })
+        }
+        sheet.add(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, ui.dp(12), 0, 0)
+            addView(MoonButton(this@MainActivity, ui, MoonButton.Style.GHOST, "取消").apply {
+                setOnClickListener { sheet.dismiss() }
+            }, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(44)
+            ))
+        })
+        sheet.setOnDismissListener {
             chooserVisible = false
             // 用户主动取消后不要在下次回到前台又自动弹出
             if (!picked) autoPickerArmed = false
         }
         chooserVisible = true
-        dialog.show()
+        sheet.show()
     }
 
     private fun resolveFile(uri: Uri): OutgoingFile? {
@@ -998,13 +1467,19 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun startSend(files: List<OutgoingFile>, peer: Peer, restoreUris: List<Uri> = emptyList()) {
+    private fun startSend(
+        files: List<OutgoingFile>,
+        peer: Peer,
+        restoreUris: List<Uri> = emptyList()
+    ) {
         if (sending) return
 
         sending = true
         sendingProgress = 0.0
-        sendingText = "准备发送…"
-        sendResult = ""
+        sendingName = files.firstOrNull()?.name.orEmpty()
+        sendingLargeFile = files.sumOf { it.size } > 100L * 1024L * 1024L
+        displayResult = ""
+        resultToken++
         refreshTransferUi()
 
         client.send(
@@ -1017,7 +1492,7 @@ class MainActivity : Activity() {
                     // 并发时回调可能乱序到达，进度只增不减
                     val fraction = if (total > 0) sent.toDouble() / total else 0.0
                     sendingProgress = maxOf(sendingProgress, fraction)
-                    sendingText = "发送中 ${(sendingProgress * 100).toInt()}% · $name"
+                    sendingName = name
                     refreshTransferUi()
                 }
             },
@@ -1025,13 +1500,20 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     sending = false
                     sendingProgress = 0.0
-                    sendingText = ""
-                    sendResult = result.fold(
+                    result.fold(
                         onSuccess = {
-                            SentStore.add(this, files.map { file -> file.name },
-                                peer.name, files.sumOf { file -> file.size })
+                            SentStore.add(
+                                this,
+                                files.map { file -> file.name },
+                                peer.name,
+                                files.sumOf { file -> file.size }
+                            )
                             refreshSent()
-                            "已发送 ${files.size} 个文件到 ${peer.name}"
+                            showResult(
+                                "已发送 ${files.size} 个文件到 ${peer.name}",
+                                error = false,
+                                title = "发送完成"
+                            )
                         },
                         onFailure = {
                             com.macdrop.mobile.net.MobileLog.write("发送失败：${it.message}")
@@ -1042,10 +1524,13 @@ class MainActivity : Activity() {
                                 pendingUris.addAll(0, restored)
                                 updatePendingUi()
                             }
-                            "发送失败：${it.message}"
+                            showResult(
+                                "发送失败：${it.message}",
+                                error = true,
+                                title = "发送失败"
+                            )
                         }
                     )
-                    refreshTransferUi()
                     clearOutgoingCache()
                     handler.post { maybeAutoPresent() }
                 }
@@ -1053,49 +1538,246 @@ class MainActivity : Activity() {
         )
     }
 
-    // MARK: - 发送记录
+    // MARK: - 记录
 
     private fun refreshSent() {
         sentRecords.clear()
         sentRecords.addAll(SentStore.load(this))
-        renderSent()
+        if (::historySegmented.isInitialized) {
+            updateHistoryLabels()
+            if (!showReceivedHistory) renderHistory()
+        }
     }
 
-    private fun renderSent() {
-        sentContainer.removeAllViews()
-        sentHint.visibility = if (sentRecords.isEmpty()) View.VISIBLE else View.GONE
-        val formatter = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
-        sentRecords.forEachIndexed { index, record ->
-            if (index > 0) {
-                sentContainer.addView(View(this).apply {
-                    setBackgroundColor(DIVIDER)
-                    layoutParams = LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, dp(1)
-                    )
-                })
+    private fun refreshReceived() {
+        thread(name = "macdrop-received") {
+            val items = try {
+                store.listReceived()
+            } catch (_: Exception) {
+                emptyList()
             }
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(2), dp(8), dp(2), dp(8))
+            runOnUiThread {
+                receivedItems.clear()
+                receivedItems.addAll(items)
+                if (::historySegmented.isInitialized) {
+                    updateHistoryLabels()
+                    if (showReceivedHistory) renderHistory()
+                }
             }
-            val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            column.addView(TextView(this).apply {
-                text = if (record.names.size == 1) record.names[0] else "${record.names.size} 个文件"
-                textSize = 15f
-                setTextColor(TEXT)
-                maxLines = 1
-            })
-            column.addView(TextView(this).apply {
-                text = "→ ${record.target} · ${NetUtil.formatBytes(record.size)} · " +
-                    formatter.format(Date(record.date))
-                textSize = 12f
-                setTextColor(SECONDARY)
-                setPadding(0, dp(2), 0, 0)
-            })
-            row.addView(column, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            sentContainer.addView(row)
         }
+    }
+
+    private fun updateHistoryLabels() {
+        historySegmented.setLabel(
+            0,
+            if (sentRecords.isEmpty()) "已发送" else "已发送 ${sentRecords.size}"
+        )
+        historySegmented.setLabel(
+            1,
+            if (receivedItems.isEmpty()) "已接收" else "已接收 ${receivedItems.size}"
+        )
+    }
+
+    private fun renderHistory() {
+        if (!::historyContainer.isInitialized) return
+        historyContainer.removeAllViews()
+        val hasItems = if (showReceivedHistory) receivedItems.isNotEmpty() else sentRecords.isNotEmpty()
+        historyClear.visibility = if (hasItems) View.VISIBLE else View.GONE
+        if (showReceivedHistory) renderReceivedItems() else renderSentItems()
+    }
+
+    private fun renderSentItems() {
+        if (sentRecords.isEmpty()) {
+            historyContainer.addView(moonEmptyState(
+                ui,
+                R.drawable.ic_moon_send,
+                "还没有发送记录",
+                "发出的文件会按时间出现在这里"
+            ))
+            return
+        }
+        var currentDay = ""
+        sentRecords.forEachIndexed { index, record ->
+            val day = dayLabel(record.date)
+            if (day != currentDay) {
+                currentDay = day
+                historyContainer.addView(groupHeader(day))
+            } else if (index > 0) {
+                historyContainer.addView(moonDivider(ui, 60))
+            }
+            historyContainer.addView(sentRow(record))
+        }
+    }
+
+    private fun sentRow(record: SentRecord): LinearLayout {
+        val c = ui.colors
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = ui.dp(64)
+            setPadding(ui.dp(10), ui.dp(8), ui.dp(10), ui.dp(8))
+        }
+        val name = if (record.names.size == 1) record.names[0] else "${record.names.size} 个文件"
+        row.addView(moonIconTile(ui, fileIcon(name), 40, 20))
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(ui.dp(12), 0, ui.dp(8), 0)
+        }
+        column.addView(moonText(ui, name, 15f, c.textPrimary, ui.medium, maxLines = 1))
+        column.addView(moonText(
+            ui,
+            "→ ${record.target} · ${NetUtil.formatBytes(record.size)} · " +
+                SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(record.date)),
+            12f,
+            c.textSecondary,
+            maxLines = 1
+        ).apply { setPadding(0, ui.dp(2), 0, 0) })
+        row.addView(column, LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+        ))
+        row.addView(moonIcon(ui, R.drawable.ic_moon_check, 18, c.success).apply {
+            contentDescription = "已发送"
+        })
+        return row
+    }
+
+    private fun renderReceivedItems() {
+        if (receivedItems.isEmpty()) {
+            historyContainer.addView(moonEmptyState(
+                ui,
+                R.drawable.ic_moon_folder,
+                "还没有接收文件",
+                "其他设备发来的文件会出现在这里",
+                "刷新"
+            ) { refreshReceived() })
+            return
+        }
+        val swipeRows = mutableListOf<SwipeRowLayout>()
+        var currentDay = ""
+        receivedItems.forEachIndexed { index, entry ->
+            val day = dayLabel(entry.modified)
+            if (day != currentDay) {
+                currentDay = day
+                historyContainer.addView(groupHeader(day))
+            } else if (index > 0) {
+                historyContainer.addView(moonDivider(ui, 60))
+            }
+            val row = receivedRow(entry)
+            val swipeRow = SwipeRowLayout(this).apply {
+                setForeground(row)
+                onDelete = { deleteEntry(entry) }
+                onOpen = { swipeRows.forEach { other -> if (other !== this) other.close() } }
+            }
+            swipeRows.add(swipeRow)
+            historyContainer.addView(swipeRow)
+        }
+    }
+
+    private fun receivedRow(entry: ReceivedEntry): LinearLayout {
+        val c = ui.colors
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = ui.dp(64)
+            setPadding(ui.dp(10), ui.dp(8), ui.dp(4), ui.dp(8))
+            setBackgroundColor(c.surface)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { openEntry(entry) }
+        }
+        row.addView(moonIconTile(ui, fileIcon(entry.name), 40, 20))
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(ui.dp(12), 0, ui.dp(8), 0)
+        }
+        column.addView(moonText(ui, entry.name, 15f, c.textPrimary, ui.medium, maxLines = 1))
+        column.addView(moonText(
+            ui,
+            "${NetUtil.formatBytes(entry.size)} · " +
+                SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(entry.modified)),
+            12f,
+            c.textSecondary,
+            maxLines = 1
+        ).apply { setPadding(0, ui.dp(2), 0, 0) })
+        row.addView(column, LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+        ))
+        row.addView(moonIconButton(ui, R.drawable.ic_moon_more, "更多操作") {
+            showEntryActions(entry)
+        })
+        return row
+    }
+
+    private fun groupHeader(label: String): TextView =
+        moonText(ui, label, 12f, ui.colors.textSecondary, ui.medium).apply {
+            setPadding(ui.dp(12), ui.dp(12), 0, ui.dp(2))
+        }
+
+    private fun dayLabel(timestamp: Long): String {
+        val today = Calendar.getInstance()
+        val target = Calendar.getInstance().apply { timeInMillis = timestamp }
+        if (today.get(Calendar.YEAR) == target.get(Calendar.YEAR) &&
+            today.get(Calendar.DAY_OF_YEAR) == target.get(Calendar.DAY_OF_YEAR)
+        ) {
+            return "今天"
+        }
+        val yesterday = (today.clone() as Calendar).apply {
+            add(Calendar.DAY_OF_YEAR, -1)
+        }
+        if (yesterday.get(Calendar.YEAR) == target.get(Calendar.YEAR) &&
+            yesterday.get(Calendar.DAY_OF_YEAR) == target.get(Calendar.DAY_OF_YEAR)
+        ) {
+            return "昨天"
+        }
+        val pattern = if (today.get(Calendar.YEAR) == target.get(Calendar.YEAR)) {
+            "M月d日"
+        } else {
+            "yyyy年M月d日"
+        }
+        return SimpleDateFormat(pattern, Locale.getDefault()).format(Date(timestamp))
+    }
+
+    private fun fileIcon(name: String): Int {
+        val ext = name.substringAfterLast('.', "").lowercase(Locale.getDefault())
+        return when (ext) {
+            "jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "bmp", "svg" ->
+                R.drawable.ic_moon_image
+            "mp4", "mov", "m4v", "mkv", "avi", "webm", "3gp" -> R.drawable.ic_moon_video
+            "mp3", "wav", "m4a", "aac", "flac", "ogg" -> R.drawable.ic_moon_audio
+            "apk", "xapk", "apks" -> R.drawable.ic_moon_apk
+            "zip", "rar", "7z", "tar", "gz", "bz2" -> R.drawable.ic_moon_archive
+            "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "rtf" ->
+                R.drawable.ic_moon_file
+            else -> R.drawable.ic_moon_file
+        }
+    }
+
+    private fun showEntryActions(entry: ReceivedEntry) {
+        val sheet = MoonSheet(this, ui, entry.name)
+        sheet.addAction(
+            if (isApk(entry)) R.drawable.ic_moon_apk else R.drawable.ic_moon_file,
+            if (isApk(entry)) "安装" else "打开"
+        ) {
+            sheet.dismiss()
+            openEntry(entry)
+        }
+        sheet.addAction(R.drawable.ic_moon_share, "分享") {
+            sheet.dismiss()
+            shareEntry(entry)
+        }
+        if (GallerySettings.isMedia(entry.name) &&
+            !GallerySettings.isInGallery(entry.relativePath)
+        ) {
+            sheet.addAction(R.drawable.ic_moon_download, "存入相册") {
+                sheet.dismiss()
+                saveToGallery(entry)
+            }
+        }
+        sheet.addAction(R.drawable.ic_moon_delete, "删除", danger = true) {
+            sheet.dismiss()
+            deleteEntry(entry)
+        }
+        sheet.show()
     }
 
     private fun confirmClearSent() {
@@ -1114,7 +1796,7 @@ class MainActivity : Activity() {
     private fun confirmClearReceived() {
         AlertDialog.Builder(this)
             .setTitle("清空已接收？")
-            .setMessage("已接收的文件会从「下载 / 来自另一台Mac」里删除，无法恢复。相册里的副本不受影响。")
+            .setMessage("「下载 / 来自另一台Mac」里的文件会被删除，无法恢复。已经存入系统相册的图片和视频会保留在相册里，只是从这个列表移除。")
             .setPositiveButton("删除全部") { _, _ ->
                 thread(name = "macdrop-clear") {
                     runCatching { store.clearReceived() }
@@ -1123,78 +1805,6 @@ class MainActivity : Activity() {
             }
             .setNegativeButton("取消", null)
             .show()
-    }
-
-    // MARK: - 已接收文件
-
-    private fun refreshReceived() {
-        thread(name = "macdrop-received") {
-            val items = try {
-                store.listReceived()
-            } catch (_: Exception) {
-                emptyList()
-            }
-            runOnUiThread { renderReceived(items) }
-        }
-    }
-
-    private fun renderReceived(items: List<ReceivedEntry>) {
-        receivedContainer.removeAllViews()
-        receivedHint.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
-
-        val formatter = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
-        val swipeRows = mutableListOf<SwipeRowLayout>()
-        items.forEachIndexed { index, entry ->
-            if (index > 0) {
-                receivedContainer.addView(View(this).apply {
-                    setBackgroundColor(DIVIDER)
-                    layoutParams = LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, dp(1)
-                    )
-                })
-            }
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(8), dp(10), dp(8), dp(10))
-                setBackgroundColor(Color.WHITE)
-                isClickable = true
-                setOnClickListener { openEntry(entry) }
-            }
-
-            val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            column.addView(TextView(this).apply {
-                text = entry.name
-                textSize = 15f
-                setTextColor(TEXT)
-                maxLines = 1
-            })
-            column.addView(TextView(this).apply {
-                text = "${NetUtil.formatBytes(entry.size)} · ${formatter.format(Date(entry.modified))}"
-                textSize = 12f
-                setTextColor(SECONDARY)
-                setPadding(0, dp(2), 0, 0)
-            })
-            row.addView(column, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-
-            if (isApk(entry)) {
-                row.addView(actionLabel("安装", ACCENT) { installApk(entry) })
-                row.addView(actionLabel("分享", SECONDARY) { shareEntry(entry) })
-            } else {
-                if (GallerySettings.isMedia(entry.name)) {
-                    row.addView(actionLabel("相册", ACCENT) { saveToGallery(entry) })
-                }
-                row.addView(actionLabel("分享", ACCENT) { shareEntry(entry) })
-            }
-
-            val swipeRow = SwipeRowLayout(this).apply {
-                setForeground(row)
-                onDelete = { deleteEntry(entry) }
-                onOpen = { swipeRows.forEach { other -> if (other !== this) other.close() } }
-            }
-            swipeRows.add(swipeRow)
-            receivedContainer.addView(swipeRow)
-        }
     }
 
     private fun openEntry(entry: ReceivedEntry) {
@@ -1219,16 +1829,6 @@ class MainActivity : Activity() {
     }
 
     // MARK: - 安装 APK
-
-    private fun actionLabel(label: String, color: Int, action: () -> Unit): TextView =
-        TextView(this).apply {
-            text = label
-            textSize = 13f
-            setTextColor(color)
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            isClickable = true
-            setOnClickListener { action() }
-        }
 
     private fun isApk(entry: ReceivedEntry): Boolean =
         entry.name.endsWith(".apk", ignoreCase = true)
@@ -1320,7 +1920,8 @@ class MainActivity : Activity() {
         }
     }
 
-    /// 再复制一份到相册目录（Pictures/MoonDrop、Movies/MoonDrop），「下载」里的原件不动
+    // 把下载目录里的媒体移到相册目录；已在相册里的条目由 store 直接判重。
+    // 移动后原 URI 失效，所以成功后必须刷新列表。
     private fun saveToGallery(entry: ReceivedEntry) {
         thread(name = "macdrop-gallery") {
             val result = runCatching { store.saveToGallery(entry) }
@@ -1329,14 +1930,12 @@ class MainActivity : Activity() {
                     onSuccess = { "已存入相册：${entry.name}" },
                     onFailure = { "存入相册失败：${it.message ?: "未知错误"}" }
                 ))
+                if (result.isSuccess) refreshReceived()
             }
         }
     }
 
     // MARK: - 小工具
-
-    private fun dp(value: Int): Int =
-        (value * resources.displayMetrics.density).toInt()
 
     private fun toast(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
@@ -1347,11 +1946,5 @@ class MainActivity : Activity() {
         private const val REQ_ALBUM = 1004
         private const val REQ_NOTIFICATIONS = 1003
         private const val APK_MIME = "application/vnd.android.package-archive"
-
-        private val BG = Color.parseColor("#F5F6F8")
-        private val TEXT = Color.parseColor("#111827")
-        private val SECONDARY = Color.parseColor("#6B7280")
-        private val ACCENT = Color.parseColor("#1565C0")
-        private val DIVIDER = Color.parseColor("#EEF0F3")
     }
 }

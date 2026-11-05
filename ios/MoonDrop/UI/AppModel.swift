@@ -9,6 +9,7 @@ final class AppModel: ObservableObject {
     private static let deviceIDKey = "com.macdrop.mobile.deviceID"
     private static let deviceNameKey = "com.macdrop.mobile.deviceName"
     private static let autoSaveKey = "com.macdrop.mobile.autoSavePhotos"
+    private static let savedPhotosKey = "com.macdrop.mobile.savedPhotoPaths"
     private static let sentKey = "com.macdrop.mobile.sentRecords"
     private static let appGroupID = "group.com.macdrop.mobile"
 
@@ -28,6 +29,12 @@ final class AppModel: ObservableObject {
     /// 收到的图片/视频自动写进系统相册
     @Published var autoSaveToPhotos: Bool {
         didSet { defaults.set(autoSaveToPhotos, forKey: Self.autoSaveKey) }
+    }
+
+    /// 已经写入系统相册的文件路径。PHAsset 每次保存都会新建一个资源，自动保存和手动
+    /// 「存入相册」必须共用这份记录，否则用户点一下按钮相册里就会多出一张一样的照片。
+    @Published private(set) var savedPhotoPaths: Set<String> = [] {
+        didSet { defaults.set(Array(savedPhotoPaths), forKey: Self.savedPhotosKey) }
     }
 
     @Published private(set) var sending = false
@@ -90,6 +97,7 @@ final class AppModel: ObservableObject {
         let initialName = (savedName?.isEmpty == false) ? savedName! : (rawName.isEmpty ? "iPhone" : rawName)
         deviceName = initialName
         autoSaveToPhotos = defaults.object(forKey: Self.autoSaveKey) as? Bool ?? true
+        savedPhotoPaths = Set(defaults.stringArray(forKey: Self.savedPhotosKey) ?? [])
         sentRecords = AppModel.loadSentRecords(from: defaults)
 
         // 属性包装器（@Published）在 self 完全初始化前不能读，这里一律用局部常量
@@ -379,8 +387,13 @@ final class AppModel: ObservableObject {
     // MARK: - 发送
 
     /// 选完文件先弹设备选择器；真正发送在 choosePeer 里。
-    func requestSend(urls: [URL]) {
+    /// 从设备行进入时已经确定了目标，直接开传。
+    func requestSend(urls: [URL], to peer: Peer? = nil) {
         guard !urls.isEmpty, !sending else { return }
+        if let peer {
+            send(urls: urls, to: peer, scopes: nil)
+            return
+        }
         guard !peers.isEmpty else {
             reportError("没有可用设备")
             return
@@ -562,6 +575,12 @@ final class AppModel: ObservableObject {
         resultIsError = true
     }
 
+    /// 结果条 5 秒（失败 8 秒）后自动收起；只清掉同一条，避免误删新结果
+    func dismissResult(expected text: String) {
+        guard resultText == text else { return }
+        resultText = ""
+    }
+
     // MARK: - 接收
 
     private func handleReceiveProgress(_ fraction: Double, name: String) {
@@ -584,6 +603,7 @@ final class AppModel: ObservableObject {
                 guard let self else { return }
                 switch result {
                 case .success:
+                    self.markSavedToPhotos(url)
                     self.resultText = "已接收并存入相册：\(url.lastPathComponent)"
                     self.resultIsError = false
                 case .failure(let error):
@@ -594,12 +614,26 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// 手动把已接收的图片/视频存进相册
+    func didSaveToPhotos(_ item: ReceivedItem) -> Bool {
+        savedPhotoPaths.contains(item.url.path)
+    }
+
+    private func markSavedToPhotos(_ url: URL) {
+        savedPhotoPaths.insert(url.path)
+    }
+
+    /// 手动把已接收的图片/视频存进相册；已经存过的直接拒绝，避免重复插入 PHAsset
     func saveToPhotos(_ item: ReceivedItem) {
+        guard !didSaveToPhotos(item) else {
+            resultText = "已经在相册里了：\(item.name)"
+            resultIsError = false
+            return
+        }
         PhotoSaver.save(item.url) { [weak self] result in
             guard let self else { return }
             switch result {
             case .success:
+                self.markSavedToPhotos(item.url)
                 self.resultText = "已存入相册：\(item.name)"
                 self.resultIsError = false
             case .failure(let error):
@@ -642,13 +676,22 @@ final class AppModel: ObservableObject {
 
     func deleteItems(at offsets: IndexSet) {
         for index in offsets {
+            savedPhotoPaths.remove(received[index].url.path)
             try? FileManager.default.removeItem(at: received[index].url)
         }
         refreshReceived()
     }
 
+    /// 单条删除：记录按天分组后 IndexSet 对不上，用条目本身定位
+    func delete(_ item: ReceivedItem) {
+        savedPhotoPaths.remove(item.url.path)
+        try? FileManager.default.removeItem(at: item.url)
+        refreshReceived()
+    }
+
     /// 清空已接收：删掉文件本身，只留空列表
     func clearReceived() {
+        savedPhotoPaths = []
         store.clearReceived()
         refreshReceived()
     }
@@ -688,7 +731,7 @@ final class AppModel: ObservableObject {
     // MARK: - 从相册发送
 
     /// 相册里选中的图片/视频：先落成临时文件，再走原来的发送流程
-    func sendFromAlbum(_ items: [PhotosPickerItem]) {
+    func sendFromAlbum(_ items: [PhotosPickerItem], to peer: Peer? = nil) {
         guard !items.isEmpty else { return }
         Task {
             var urls: [URL] = []
@@ -713,7 +756,7 @@ final class AppModel: ObservableObject {
                 reportError("没能读取所选照片")
                 return
             }
-            requestSend(urls: urls)
+            requestSend(urls: urls, to: peer)
         }
     }
 }
