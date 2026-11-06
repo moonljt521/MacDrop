@@ -1,207 +1,160 @@
----
-version: alpha
-name: MoonDrop Mobile
-description: iOS and Android clients for the MoonDrop local-network file transfer utility.
-colors:
-  canvas: "#F7F9FC"
-  surface: "#FFFFFF"
-  surface-muted: "#F1F5F9"
-  text-primary: "#0F172A"
-  text-secondary: "#64748B"
-  text-tertiary: "#94A3B8"
-  divider: "#EDF1F6"
-  primary: "#2C6BFF"
-  primary-strong: "#1E56D6"
-  primary-tint: "#EAF0FF"
-  on-primary: "#FFFFFF"
-  success: "#12B76A"
-  success-text: "#067647"
-  success-tint: "#E7F8F0"
-  warning: "#F79009"
-  warning-text: "#B54708"
-  warning-tint: "#FFF4E5"
-  danger: "#EF4444"
-  danger-text: "#B42318"
-  danger-tint: "#FEF3F2"
-typography:
-  brand:
-    fontFamily: SF Pro
-    fontSize: 20px
-    fontWeight: 600
-    lineHeight: 26px
-    letterSpacing: 0px
-  hero:
-    fontFamily: SF Pro
-    fontSize: 26px
-    fontWeight: 700
-    lineHeight: 32px
-    letterSpacing: -0.5px
-  section:
-    fontFamily: SF Pro
-    fontSize: 15px
-    fontWeight: 600
-    lineHeight: 20px
-  body:
-    fontFamily: SF Pro
-    fontSize: 16px
-    fontWeight: 400
-    lineHeight: 22px
-  row-title:
-    fontFamily: SF Pro
-    fontSize: 15px
-    fontWeight: 500
-    lineHeight: 20px
-  meta:
-    fontFamily: SF Pro
-    fontSize: 12px
-    fontWeight: 400
-    lineHeight: 16px
-  numeric:
-    fontFamily: SF Pro
-    fontSize: 24px
-    fontWeight: 700
-    lineHeight: 28px
-    fontFeature: tnum
-  button:
-    fontFamily: SF Pro
-    fontSize: 15px
-    fontWeight: 600
-    lineHeight: 20px
-rounded:
-  sm: 10px
-  md: 14px
-  lg: 18px
-  xl: 24px
-  full: 999px
-spacing:
-  xs: 4px
-  sm: 8px
-  md: 12px
-  lg: 16px
-  xl: 20px
-  2xl: 24px
-  3xl: 32px
-components:
-  card:
-    backgroundColor: "{colors.surface}"
-    rounded: "{rounded.lg}"
-    padding: "{spacing.lg}"
-  primary-button:
-    backgroundColor: "{colors.primary}"
-    textColor: "{colors.on-primary}"
-    rounded: "{rounded.md}"
-    height: 48px
-  secondary-button:
-    backgroundColor: "{colors.primary-tint}"
-    textColor: "{colors.primary-strong}"
-    rounded: "{rounded.md}"
-    height: 48px
-  status-pill:
-    backgroundColor: "{colors.surface-muted}"
-    rounded: "{rounded.full}"
-    height: 28px
-  device-row:
-    height: 64px
-  segmented-control:
-    backgroundColor: "{colors.surface-muted}"
-    rounded: "{rounded.md}"
-    height: 36px
-  bottom-sheet:
-    backgroundColor: "{colors.surface}"
-    rounded: "{rounded.xl}"
----
-## Overview
+# MoonDrop Mobile — Design
 
-MoonDrop Mobile transfers files directly between a phone and another device on the same local network. The interface exists to answer three questions in order: is this phone reachable, which devices are nearby, and what is being sent or received. The visual direction is a calm, native utility: neutral surfaces, SF Pro/Roboto type, and brand blue reserved for the primary action and active state.
+Single design reference for the iOS and Android clients. macOS is out of scope.
+Tokens live in `ios/MoonDrop/UI/MoonTheme.swift` and `android/app/src/main/java/com/macdrop/mobile/ui/MoonTheme.kt`; update this file when they change.
 
-## Colors
+## Principles
 
-Brand blue appears only on the primary button, selected segment, active icon tile, and focus rings. Every other surface stays neutral so the primary action is unambiguous.
+- One task: send or receive a file between nearby devices. No tab bar, no dashboard.
+- The nearby-device stage is the focal point; the file/photos tray is always within thumb reach.
+- Show only states that exist. Pending is not sent, and progress is real, never simulated.
+- Neutral surfaces and system type carry the hierarchy; brand blue is reserved for progress, links, and status.
+- Never infer a device type, model, or identity from its name.
 
-Status color is never the only signal. A status is rendered as a colored dot plus text, except for large icons that carry an adjacent label.
+## Screen Anatomy
 
-`success`, `warning`, and `danger` are reserved for dots, icons, and fills. Text uses `success-text`, `warning-text`, and `danger-text` because the bright variants fall below 4.5:1 on white.
+Top to bottom, one vertical scroll:
 
-## Themes
+1. **Brand bar** — crescent + MoonDrop on the left, settings on the right.
+2. **This device row** — name, reachability, chevron to connection details, separate rename button.
+3. **Page title** — the current mode ("Nearby", "Receiving", "Result", etc.) plus one subtitle with the actual device count or hint.
+4. **Stage** — nearby devices, pending files, the live transfer ring, or the result.
+5. **Secondary actions** — scan again / manual add.
+6. **Anchored tray** — file and photos actions, then the most recent transfer row (opens history).
 
-The frontmatter records the light theme. Dark mode uses the values below; the active theme is selected from the system appearance, with no in-app switch.
+Settings, connection details, storage help, and manual add are sheets. History is a full-height sheet, never a block on the home screen.
 
-| Token | Dark value |
+## Device Stage
+
+The stage has one local device mark at the bottom centre and peers arranged on decorative arcs. Peers are real discovered endpoints only; the arcs are decoration, not distance.
+
+| Peers | Arrangement |
 |---|---|
-| canvas | `#0B0F14` |
-| surface | `#141A22` |
-| surface-muted | `#1B232D` |
-| text-primary | `#E8EDF5` |
-| text-secondary | `#9AA7B8` |
-| text-tertiary | `#6B7A8C` |
-| divider | `#242D39` |
-| primary | `#6E9BFF` |
-| primary-strong | `#A8C3FF` |
-| primary-tint | `#1A2740` |
-| on-primary | `#06122B` |
-| success | `#3DD68C` |
-| success-text | `#6EE7B7` |
-| success-tint | `#102A20` |
-| warning | `#FDB022` |
-| warning-text | `#FEC84B` |
-| warning-tint | `#2A210F` |
-| danger | `#F97066` |
-| danger-text | `#FDA29B` |
-| danger-tint | `#2A1512` |
+| 1 | one slot at top centre |
+| 2 | two slots on the upper arc |
+| 3 | one top, two lower-left / lower-right |
+| 4 | 2 + 2 (upper arc, lower arc) |
+| 5 | 3 + 2 |
+| 6 | 3 + 3, single-line names, compact glyph |
+| >6, or enlarged text | native list fallback |
+
+- No pagination in any case.
+- Peer glyphs shrink as density rises: 68 → 56 for 4–5 peers; the 6-peer layout is smaller on Android and uses single-line names on both platforms.
+- Every peer is one button with the accessible label "Send to <name>" and the route as its value.
+- The local device and its "This device" label stay at the bottom centre of the stage.
+- If names cannot fit, fall back to a full-width list instead of truncating every row.
+
+## States
+
+The same central slot switches in place, so two states never stack.
+
+| State | Content |
+|---|---|
+| Idle | nearby-device stage |
+| Pending | pending count, choose/send/cancel; stage is replaced, truthfully labelled as pending |
+| Sending | real percentage ring, file name, size, large-file warning |
+| Receiving | real percentage ring, sender and file |
+| Result | success/error icon, message, automatic dismissal |
+
+The ring uses measured progress only. It never animates on a timer or fills to a guessed value.
+
+## Tray and Sheets
+
+- Tray is anchored above the safe area: file action on `ink`, photos action on `surface`, both at least 56 pt/dp.
+- Recent transfer is one compact row and opens the complete history sheet. At very large text sizes it moves into the scroll so the tray does not consume the screen.
+- History: sent/received segmented control, date-grouped sections, preview/share/save/delete per row, explicit Close, and a native alert with a visible Cancel for destructive clear.
+- Settings: appearance, language, auto-save to photos, background receiving, connection details, storage help, version.
+- Every sheet has a visible close or done control; drag-to-dismiss is never the only exit.
+
+## Color
+
+Shared light/dark tokens:
+
+| Token | Light | Dark | Use |
+|---|---|---|---|
+| canvas | `#F7F8FB` | `#11141C` | screen background |
+| surface | `#FFFFFF` | `#202631` | cards, dock, sheets |
+| surfaceMuted | `#EDF1FB` | `#242E47` | tints, local device |
+| ink / onInk | `#233149` / `#FFFFFF` | `#DCE5FA` / `#1B2740` | file action |
+| textPrimary | `#202B40` | `#EDF1FB` | primary copy |
+| textSecondary | `#687284` | `#A7B1C4` | hints, routes |
+| divider | `#E2E7F0` | `#303B50` | hairlines at 1 physical pixel |
+| primary | `#3E5BCA` | `#A9BBFF` | progress, links, local icon |
+| success | `#227B65` | `#7DD4B6` | success state |
+| warning | `#F79009` | `#FDB022` | warnings |
+| danger | `#EF4444` | `#F97066` | destructive/errors |
+| dangerText | `#B42318` | `#FDA29B` | error copy on surfaces |
+
+Rules:
+
+- Secondary text must clear 4.5:1 against canvas/surface; do not lighten it for aesthetics.
+- Status color is never the only signal: pair it with text or an icon.
+- No shadows, neon, or heavy borders. Separation comes from surface steps, hairlines, and spacing.
+- Do not tint whole cards; one primary-colored object per viewport is enough.
 
 ## Typography
 
-The scale has seven roles and no others. `brand` is the app name, `hero` is the local device name, `section` is a group heading, `row-title` is a device or file name, `body` is explanatory copy, `meta` is timestamp and size, and `numeric` is the transfer percentage.
+Semantic roles, never ad-hoc sizes:
 
-iOS uses SF Pro through Dynamic Type text styles; Android uses Roboto through `sp`. Sizes in the frontmatter are the default values, and both platforms must scale with the system text-size setting.
+| Role | iOS | Android |
+|---|---|---|
+| Brand | `.title3` semibold | 21sp medium |
+| Page title | `.largeTitle` bold | 29sp medium, tight tracking |
+| Section / sheet title | `.title3` semibold | 17sp medium |
+| Device/file name | `.callout` medium | 13sp medium |
+| Body / hint | `.callout` | 16sp |
+| Meta (route, size) | `.footnote` | 13sp |
+| Label | `.caption` | 12sp |
+| Numeric progress | `.title3` semibold | 28sp semibold |
+| Button | `.callout` semibold | 16sp medium |
 
-Body copy never drops below 16px/sp. Labels never drop below 12px/sp.
+- Use semantic text styles on iOS and `sp` on Android so Dynamic Type / font scale works.
+- Body copy never below 16; labels never below 11–12.
+- Names may use two lines on the stage; only the 6-peer layout uses one line, with the full name still available to accessibility and the send sheet.
 
-## Layout
+## Shape and Spacing
 
-Screens use a single vertical scroll; there is no tab bar. History is split by a segmented control instead of a second screen.
+- Radii: panel 22, dock 24, control 14–18, device tile 24 (20 when compact), small 10.
+- Spacing steps: 4 / 8 / 12 / 16 / 20 / 24 / 32.
+- Hairlines are one physical pixel, not one point/dp.
+- Cards use internal padding of 16–20; grouped rows are separated by spacing, not boxes.
 
-Horizontal page padding is `spacing.xl` (20px). Cards use `spacing.lg` (16px) internal padding. Adjacent cards are separated by `spacing.md` (12px); sections by `spacing.2xl` (24px).
+## Appearance
 
-The local device block is the first content on the screen and the only block with the `hero` type role. The transfer block sits directly below it whenever a transfer is active, before the send actions.
+- Three modes: follow system (default), light, dark.
+- Persisted: iOS `moon.appearance`; Android `moon_ui_prefs.appearance`.
+- iOS applies a window-level `overrideUserInterfaceStyle`, so already-presented sheets switch immediately and follow-system still tracks the OS.
+- Android wraps the activity base context with the night configuration, then recreates the activity.
+- Both palettes must be verified with real content; do not design only for light.
 
-Interactive targets are at least 44×44pt on iOS and 48×48dp on Android, even when the visible icon is smaller. A device row and a history row are both tappable across their full width; no row contains a second primary action.
+## Language
 
-## Elevation & Depth
+- Simplified Chinese (default) and English.
+- Persisted: iOS `moon.language`; Android `moon_ui_prefs.language`.
+- Runtime string tables (`MoonPreferences.swift`, `MoonStrings.kt`) switch copy immediately without restart; do not rely on system language.
+- Cover titles, hints, buttons, alerts, toasts, accessibility labels, route names, history dates, and send/receive results.
+- Never translate user data: device names, file names, IPs, ports.
+- Date headings follow the selected language (Today/Yesterday and localized date patterns), not the system locale.
+- Language labels themselves stay native: 简体中文 / English.
 
-Cards use no shadow and no border. Light theme separates `surface` from `canvas` through color and spacing; dark theme does the same with a one-step surface lift. The only elevated layer is a bottom sheet, which sits above the system scrim.
+## Accessibility
 
-Modals are bottom sheets on both platforms, with rounded top corners. They rely on the system scrim; there is no custom backdrop blur.
+- Minimum touch target: 44×44 pt (iOS), 48×48 dp (Android).
+- Every interactive element has a spoken label; decorative arcs and glyphs are hidden.
+- Peer buttons read "Send to <name>, <route>"; rename, settings, and history have explicit labels.
+- Support Dynamic Type / font scale: layouts reflow, and dense stages fall back to lists at large sizes.
+- Respect Reduce Motion: no decorative transitions when enabled.
+- Truncation never hides the only way to identify a target; full names remain in the send sheet and accessibility label.
 
-## Shapes
+## Copy
 
-Cards, sheets, and inner tiles use only `rounded.lg`, `rounded.xl`, `rounded.md`, and `rounded.full`. No square corners and no heavy outlines; separation comes from spacing, surface color, or the `divider` token at 1px.
+- Say "device", never "other Mac/phone", because the protocol does not expose peer type.
+- Use "This device", "Nearby", "Pending", "Sent", "Received".
+- Errors state what failed and the next step; do not blame the network without evidence.
+- No fake success: a pending file is described as waiting, never as delivered.
 
-## Components
+## Maintenance
 
-**Local device card** — `hero` device name on `card`. Status is a dot plus one of `在线`, `启动中`, `广播未上线`. Port and address share one `meta` line. Rename is a borderless action, not a second button.
-
-**Status pill** — `status-pill` shape with a 6px dot and `meta` text. Current states: online, starting, advertising unavailable.
-
-**Device row** — 40px icon tile using `primary-tint`, `row-title` name, `meta` address, trailing chevron. Peer-to-peer devices add a `warning-tint` pill. Tapping the row starts the send flow with that device preselected.
-
-**Send actions** — two tiles: file sending uses `primary-button`, album sending uses `secondary-button`. Both collapse to 40% opacity and become non-interactive when no peer is available.
-
-**Transfer card** — `section` status label, `numeric` percentage, a 6px progress track, and one `meta` line with file name and size. Large transfers add a `warning-text` line. A finished transfer shows success or failure for 5 seconds, then the card leaves the scroll.
-
-**History row** — 40px file-type icon tile, `row-title` file name, `meta` line with size, time, and peer. iOS keeps swipe-to-delete; Android keeps the existing left-swipe delete. The trailing overflow menu holds open, share, save-to-album, install, and delete; received media already saved to the library omits save-to-album.
-
-**Empty state** — 32px line icon, `row-title` heading, one `meta` line, at most one `secondary-button`. No illustrations and no multi-paragraph empty copy.
-
-**Storage and help** — one row opens a bottom sheet. Long storage and connection explanations never live in the main scroll.
-
-## Do's and Don'ts
-
-- Do use the system navigation bar and large title on iOS; do not build a custom top bar.
-- Do use `insetGrouped` list rhythm on iOS and cards on Android; do not force one platform's container onto the other.
-- Do keep one brand-blue element per viewport; do not stack colored cards.
-- Do not use gradients, neon colors, or glow effects.
-- Do not add borders to cards or rows; use spacing and `divider`.
-- Do not add a tab bar for this single-task utility.
-- Do not put more than one primary action in a row.
-- Do not shrink body copy below 16px/sp or touch targets below 44pt/48dp.
+- One design document only: this file. Do not add per-platform design docs.
+- Change tokens in code first, then update the tables here in the same commit.
+- Build both platforms after token or layout changes; UI acceptance is done on a physical iPhone and an Android device when available.
