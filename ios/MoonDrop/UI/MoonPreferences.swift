@@ -33,14 +33,6 @@ enum MoonAppearance: String, CaseIterable, Identifiable {
         case .dark: return moonT("深色")
         }
     }
-
-    var colorScheme: ColorScheme? {
-        switch self {
-        case .system: return nil
-        case .light: return .light
-        case .dark: return .dark
-        }
-    }
 }
 
 /// 轻量运行时本地化：语言与外观都存在 UserDefaults，切换后立即生效，

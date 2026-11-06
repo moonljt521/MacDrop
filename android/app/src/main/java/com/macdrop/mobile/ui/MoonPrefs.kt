@@ -88,12 +88,4 @@ object MoonPrefs {
         }
         return app.createConfigurationContext(config)
     }
-
-    /** 当前外观在系统配置下是否为深色，用于界面选中态 */
-    fun isDark(context: Context): Boolean = when (appearanceValue) {
-        APPEARANCE_DARK -> true
-        APPEARANCE_LIGHT -> false
-        else -> (context.applicationContext.resources.configuration.uiMode and
-            Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
-    }
 }
