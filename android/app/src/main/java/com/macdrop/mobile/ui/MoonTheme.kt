@@ -4,11 +4,9 @@ import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
+import android.os.Build
+import android.widget.TextView
 
-/**
- * MoonDrop 移动端设计令牌，来源见仓库根目录 DESIGN.md。
- * 浅色是默认主题，深色按系统外观自动切换；这里不提供应用内开关。
- */
 class MoonUi(val context: Context) {
 
     private val resources = context.applicationContext.resources
@@ -25,7 +23,9 @@ class MoonUi(val context: Context) {
 
     fun dpf(value: Float): Float = value * density
 
+    val regular: Typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     val medium: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+    val semibold: Typeface = Typeface.create(regular, 600, false)
     val bold: Typeface = Typeface.create("sans-serif", Typeface.BOLD)
 
     fun alpha(color: Int, alpha: Float): Int = Color.argb(
@@ -34,6 +34,39 @@ class MoonUi(val context: Context) {
         Color.green(color),
         Color.blue(color)
     )
+
+    val radiusPanel = 22
+    val radiusControl = 14
+    val radiusTile = 12
+    val radiusSmall = 10
+}
+
+object MoonType {
+    const val TOPBAR = 32f
+    const val HERO = 17f
+    const val SECTION = 20f
+    const val TITLE = 17f
+    const val BODY = 16f
+    const val META = 13f
+    const val LABEL = 12f
+    const val NUMERIC = 28f
+    const val BUTTON = 16f
+}
+
+object MoonTrack {
+    const val TIGHT = -0.02f
+    const val HERO = -0.02f
+    const val NORMAL = 0f
+    const val WIDE = 0f
+}
+
+/**
+ * 给 [TextView] 加字距。
+ */
+fun TextView.tracked(ems: Float): TextView = apply {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+        letterSpacing = ems
+    }
 }
 
 data class MoonColors(
@@ -48,6 +81,8 @@ data class MoonColors(
     val primaryStrong: Int,
     val primaryTint: Int,
     val onPrimary: Int,
+    val ink: Int,
+    val onInk: Int,
     val success: Int,
     val successText: Int,
     val successTint: Int,
@@ -60,19 +95,21 @@ data class MoonColors(
 ) {
     companion object {
         fun light() = MoonColors(
-            canvas = Color.parseColor("#F7F9FC"),
+            canvas = Color.parseColor("#F7F8FB"),
             surface = Color.parseColor("#FFFFFF"),
-            surfaceMuted = Color.parseColor("#F1F5F9"),
-            textPrimary = Color.parseColor("#0F172A"),
-            textSecondary = Color.parseColor("#64748B"),
-            textTertiary = Color.parseColor("#94A3B8"),
-            divider = Color.parseColor("#EDF1F6"),
-            primary = Color.parseColor("#2C6BFF"),
-            primaryStrong = Color.parseColor("#1E56D6"),
-            primaryTint = Color.parseColor("#EAF0FF"),
+            surfaceMuted = Color.parseColor("#EDF1FB"),
+            textPrimary = Color.parseColor("#202B40"),
+            textSecondary = Color.parseColor("#687284"),
+            textTertiary = Color.parseColor("#687284"),
+            divider = Color.parseColor("#E2E7F0"),
+            primary = Color.parseColor("#3E5BCA"),
+            primaryStrong = Color.parseColor("#3E5BCA"),
+            primaryTint = Color.parseColor("#EDF1FB"),
             onPrimary = Color.parseColor("#FFFFFF"),
-            success = Color.parseColor("#12B76A"),
-            successText = Color.parseColor("#067647"),
+            ink = Color.parseColor("#233149"),
+            onInk = Color.parseColor("#FFFFFF"),
+            success = Color.parseColor("#227B65"),
+            successText = Color.parseColor("#227B65"),
             successTint = Color.parseColor("#E7F8F0"),
             warning = Color.parseColor("#F79009"),
             warningText = Color.parseColor("#B54708"),
@@ -83,19 +120,21 @@ data class MoonColors(
         )
 
         fun dark() = MoonColors(
-            canvas = Color.parseColor("#0B0F14"),
-            surface = Color.parseColor("#141A22"),
-            surfaceMuted = Color.parseColor("#1B232D"),
-            textPrimary = Color.parseColor("#E8EDF5"),
-            textSecondary = Color.parseColor("#9AA7B8"),
-            textTertiary = Color.parseColor("#6B7A8C"),
-            divider = Color.parseColor("#242D39"),
-            primary = Color.parseColor("#6E9BFF"),
-            primaryStrong = Color.parseColor("#A8C3FF"),
-            primaryTint = Color.parseColor("#1A2740"),
-            onPrimary = Color.parseColor("#06122B"),
-            success = Color.parseColor("#3DD68C"),
-            successText = Color.parseColor("#6EE7B7"),
+            canvas = Color.parseColor("#11141C"),
+            surface = Color.parseColor("#202631"),
+            surfaceMuted = Color.parseColor("#242E47"),
+            textPrimary = Color.parseColor("#EDF1FB"),
+            textSecondary = Color.parseColor("#A7B1C4"),
+            textTertiary = Color.parseColor("#A7B1C4"),
+            divider = Color.parseColor("#303B50"),
+            primary = Color.parseColor("#A9BBFF"),
+            primaryStrong = Color.parseColor("#A9BBFF"),
+            primaryTint = Color.parseColor("#242E47"),
+            onPrimary = Color.parseColor("#1B2740"),
+            ink = Color.parseColor("#DCE5FA"),
+            onInk = Color.parseColor("#1B2740"),
+            success = Color.parseColor("#7DD4B6"),
+            successText = Color.parseColor("#7DD4B6"),
             successTint = Color.parseColor("#102A20"),
             warning = Color.parseColor("#FDB022"),
             warningText = Color.parseColor("#FEC84B"),

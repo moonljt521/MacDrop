@@ -1,26 +1,24 @@
 import SwiftUI
 import UIKit
 
-/// MoonDrop 移动端设计令牌，来源见仓库根目录 DESIGN.md。
-/// 浅色/深色跟随系统外观，不提供应用内开关。
 enum MoonTheme {
+    static let canvas = dynamic(light: 0xF7F8FB, dark: 0x11141C)
+    static let surface = dynamic(light: 0xFFFFFF, dark: 0x202631)
+    static let surfaceMuted = dynamic(light: 0xEDF1FB, dark: 0x242E47)
+    static let ink = dynamic(light: 0x233149, dark: 0xDCE5FA)
+    static let onInk = dynamic(light: 0xFFFFFF, dark: 0x1B2740)
 
-    // MARK: - Colors
+    static let textPrimary = dynamic(light: 0x202B40, dark: 0xEDF1FB)
+    static let textSecondary = dynamic(light: 0x687284, dark: 0xA7B1C4)
+    static let textTertiary = textSecondary
+    static let divider = dynamic(light: 0xE2E7F0, dark: 0x303B50)
 
-    static let canvas = dynamic(light: 0xF7F9FC, dark: 0x0B0F14)
-    static let surface = dynamic(light: 0xFFFFFF, dark: 0x141A22)
-    static let surfaceMuted = dynamic(light: 0xF1F5F9, dark: 0x1B232D)
-    static let textPrimary = dynamic(light: 0x0F172A, dark: 0xE8EDF5)
-    static let textSecondary = dynamic(light: 0x64748B, dark: 0x9AA7B8)
-    static let textTertiary = dynamic(light: 0x94A3B8, dark: 0x6B7A8C)
-    static let divider = dynamic(light: 0xEDF1F6, dark: 0x242D39)
+    static let primary = dynamic(light: 0x3E5BCA, dark: 0xA9BBFF)
+    static let primaryStrong = dynamic(light: 0x254AB3, dark: 0xA4BAFF)
+    static let primaryTint = dynamic(light: 0xEDF1FB, dark: 0x242E47)
+    static let onPrimary = dynamic(light: 0xFFFFFF, dark: 0x101A33)
 
-    static let primary = dynamic(light: 0x2C6BFF, dark: 0x6E9BFF)
-    static let primaryStrong = dynamic(light: 0x1E56D6, dark: 0xA8C3FF)
-    static let primaryTint = dynamic(light: 0xEAF0FF, dark: 0x1A2740)
-    static let onPrimary = dynamic(light: 0xFFFFFF, dark: 0x06122B)
-
-    static let success = dynamic(light: 0x12B76A, dark: 0x3DD68C)
+    static let success = dynamic(light: 0x227B65, dark: 0x7DD4B6)
     static let successText = dynamic(light: 0x067647, dark: 0x6EE7B7)
     static let successTint = dynamic(light: 0xE7F8F0, dark: 0x102A20)
 
@@ -55,49 +53,6 @@ enum MoonSendAction {
     case album
 }
 
-/// 40pt 圆角图标底，品牌蓝只在这里和主按钮上出现。
-struct MoonIconTile: View {
-    let symbol: String
-    var size: CGFloat = 40
-    var tint: Color = MoonTheme.primaryStrong
-    var background: Color = MoonTheme.primaryTint
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.32, style: .continuous)
-            .fill(background)
-            .frame(width: size, height: size)
-            .overlay(
-                Image(systemName: symbol)
-                    .font(.system(size: size * 0.46, weight: .medium))
-                    .foregroundStyle(tint)
-            )
-            .accessibilityHidden(true)
-    }
-}
-
-/// 状态始终「圆点 + 文字」，不单靠颜色传达。
-struct MoonStatusPill: View {
-    let text: String
-    let textColor: Color
-    let dotColor: Color
-    var background: Color = MoonTheme.surfaceMuted
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(dotColor)
-                .frame(width: 6, height: 6)
-            Text(text)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(textColor)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 10)
-        .frame(height: 26)
-        .background(Capsule().fill(background))
-    }
-}
-
 struct MoonChevron: View {
     var body: some View {
         Image(systemName: "chevron.right")
@@ -107,78 +62,344 @@ struct MoonChevron: View {
     }
 }
 
-struct MoonPeerToPeerBadge: View {
-    var body: some View {
-        Text("点对点")
-            .font(.caption2.weight(.medium))
-            .foregroundStyle(MoonTheme.warningText)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(MoonTheme.warningTint)
-            )
-    }
-}
-
-struct MoonDeviceRow: View {
-    let peer: Peer
-
-    var body: some View {
-        HStack(spacing: 12) {
-            MoonIconTile(symbol: peer.isManual ? "link" : "desktopcomputer")
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(peer.name)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(MoonTheme.textPrimary)
-                        .lineLimit(1)
-                    if peer.isPeerToPeer {
-                        MoonPeerToPeerBadge()
-                    }
-                }
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(MoonTheme.textSecondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-            MoonChevron()
-        }
-        .padding(.vertical, 3)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
-        .accessibilityHint("点按选择文件或从相册发送")
-    }
-
-    private var subtitle: String {
-        let address = "\(peer.host):\(peer.port)"
-        if peer.isPeerToPeer {
-            return "点对点直连 · \(address)"
-        }
-        return peer.isManual ? "手动添加 · \(address)" : address
-    }
-}
-
 struct MoonEmptyState: View {
     let symbol: String
     let title: String
     let message: String
 
     var body: some View {
-        VStack(spacing: 6) {
-            MoonIconTile(symbol: symbol, size: 44)
+        VStack(spacing: 0) {
+            Image(systemName: symbol)
+                .font(.system(size: 22, weight: .regular))
+                .foregroundStyle(MoonTheme.textTertiary)
             Text(title)
-                .font(.subheadline.weight(.medium))
+                .font(MoonType.title)
                 .foregroundStyle(MoonTheme.textPrimary)
-                .padding(.top, 4)
+                .padding(.top, 14)
             Text(message)
-                .font(.caption)
-                .foregroundStyle(MoonTheme.textSecondary)
+                .font(MoonType.meta)
+                .foregroundStyle(MoonTheme.textTertiary)
                 .multilineTextAlignment(.center)
+                .lineSpacing(3)
+                .padding(.top, 6)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
+        .padding(.vertical, 26)
+    }
+}
+
+struct MoonPeerField: View {
+    let peers: [Peer]
+    let onSelect: (Peer) -> Void
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .footnote) private var minimumFieldWidth: CGFloat = 300
+    @ScaledMetric(relativeTo: .body) private var fieldHeight: CGFloat = 316
+
+    var body: some View {
+        Group {
+            if peers.isEmpty {
+                emptyField
+            } else if usesList {
+                peerList
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    constellation
+                        .frame(minWidth: minimumFieldWidth)
+                    peerList
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .transition(reduceMotion ? .identity : .opacity)
+        .transaction { transaction in
+            if reduceMotion {
+                transaction.animation = nil
+                transaction.disablesAnimations = true
+            }
+        }
+    }
+
+    private var usesList: Bool {
+        if peers.count > 6 { return true }
+        if dynamicTypeSize >= .xxxLarge { return true }
+        if peers.count >= 6 && dynamicTypeSize >= .xLarge { return true }
+        return peers.count >= 4 && dynamicTypeSize >= .xxLarge
+    }
+
+    private var isDense: Bool { peers.count >= 4 }
+
+    private var constellation: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let height = geometry.size.height
+            let peerWidth = peerWidth(for: width)
+            ZStack(alignment: .topLeading) {
+                MoonFieldDecoration()
+                ForEach(Array(peers.enumerated()), id: \.element.endpoint) { index, peer in
+                    let slot = slot(index, width: width, height: height)
+                    MoonFieldPeerButton(peer: peer, isList: false,
+                                        compact: isDense, singleLine: peers.count >= 6,
+                                        onSelect: onSelect)
+                        .frame(width: peerWidth)
+                        .offset(x: slot.x - peerWidth / 2, y: slot.y)
+                }
+            }
+            .frame(width: width, height: height, alignment: .topLeading)
+        }
+        .frame(height: fieldHeight)
+        .frame(minHeight: fieldHeight)
+        .frame(maxWidth: max(430, minimumFieldWidth))
+        .frame(maxWidth: .infinity)
+    }
+
+    private func peerWidth(for width: CGFloat) -> CGFloat {
+        if isDense { return width * 0.31 }
+        switch peers.count {
+        case 1: return width * 0.42
+        case 2: return width * 0.34
+        default: return (width - 24) / 3
+        }
+    }
+
+    private func slot(_ index: Int, width: CGFloat, height: CGFloat) -> CGPoint {
+        let top: CGFloat = isDense ? 8 : (peers.count == 3 ? 10 : 16)
+        let lower = isDense ? (peers.count >= 6 ? 108 : 130) : height * 0.31
+        let centers: [(CGFloat, CGFloat)] = {
+            switch peers.count {
+            case 1:
+                return [(0.5, top)]
+            case 2:
+                return [(0.28, top), (0.72, top)]
+            case 3:
+                return [(0.5, top), (0.165, lower), (0.835, lower)]
+            case 4:
+                return [(0.27, top), (0.73, top), (0.165, lower), (0.835, lower)]
+            case 5:
+                return [(0.17, top), (0.5, top), (0.83, top), (0.24, lower), (0.76, lower)]
+            default:
+                return [(0.17, top), (0.5, top), (0.83, top),
+                        (0.17, lower), (0.5, lower), (0.83, lower)]
+            }
+        }()
+        let item = centers[min(index, centers.count - 1)]
+        return CGPoint(x: width * item.0, y: item.1)
+    }
+
+    private var peerList: some View {
+        VStack(spacing: 8) {
+            ForEach(peers, id: \.endpoint) { peer in
+                MoonFieldPeerButton(peer: peer, isList: true, onSelect: onSelect)
+            }
+            MoonLocalDevice()
+                .padding(.top, 24)
+        }
+        .padding(.vertical, 16)
+    }
+
+    private var emptyField: some View {
+        VStack(spacing: 24) {
+            VStack(spacing: 8) {
+                Text("等待设备出现")
+                    .font(.title3.weight(.medium))
+                    .foregroundStyle(MoonTheme.textPrimary)
+                Text("在另一台设备上打开 MoonDrop")
+                    .font(MoonType.meta)
+                    .foregroundStyle(MoonTheme.textSecondary)
+            }
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 12)
+
+            MoonFieldDecoration()
+                .frame(height: 214)
+        }
+        .padding(.top, 24)
+        .frame(minHeight: 340)
+        .frame(maxWidth: 430)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct MoonFieldPeerButton: View {
+    let peer: Peer
+    let isList: Bool
+    var compact: Bool = false
+    var singleLine: Bool = false
+    let onSelect: (Peer) -> Void
+
+    var body: some View {
+        Button {
+            onSelect(peer)
+        } label: {
+            if isList {
+                HStack(alignment: .top, spacing: 16) {
+                    glyph
+                    labels
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
+                .contentShape(Rectangle())
+            } else {
+                VStack(spacing: compact ? 6 : 8) {
+                    glyph
+                    labels
+                }
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+            }
+        }
+        .buttonStyle(MoonPressStyle())
+        .accessibilityLabel("发送到 " + peer.name)
+        .accessibilityValue(connectionType)
+    }
+
+    private var glyph: some View {
+        Image(systemName: "desktopcomputer")
+            .font(.system(size: compact ? 27 : 32, weight: .regular))
+            .foregroundStyle(MoonTheme.textPrimary)
+            .frame(width: compact ? 56 : 68, height: compact ? 56 : 68)
+            .background(MoonTheme.surface)
+            .clipShape(RoundedRectangle(cornerRadius: compact ? 20 : 24, style: .continuous))
+            .accessibilityHidden(true)
+    }
+
+    private var labels: some View {
+        VStack(alignment: isList ? .leading : .center, spacing: 4) {
+            if isList {
+                Text(peer.name)
+                    .font(MoonType.body.weight(.medium))
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(peer.name)
+                    .font(compact ? MoonType.label.weight(.medium) : MoonType.body.weight(.medium))
+                    .lineLimit(singleLine ? 1 : 2)
+            }
+            Text(connectionType)
+                .font(compact ? MoonType.label : MoonType.meta)
+                .foregroundStyle(MoonTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .foregroundStyle(MoonTheme.textPrimary)
+        .multilineTextAlignment(isList ? .leading : .center)
+    }
+
+    private var connectionType: String {
+        if peer.isManual { return "手动连接" }
+        return peer.isPeerToPeer ? "点对点直连" : "局域网直连"
+    }
+}
+
+private struct MoonLocalDevice: View {
+    @Environment(\.displayScale) private var displayScale
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "iphone")
+                .font(.system(size: 30, weight: .regular))
+                .foregroundStyle(MoonTheme.primary)
+                .frame(width: 78, height: 78)
+                .background(Circle().fill(MoonTheme.primaryTint))
+                .overlay {
+                    Circle()
+                        .strokeBorder(MoonTheme.divider, lineWidth: 1 / displayScale)
+                        .padding(-9)
+                }
+                .accessibilityHidden(true)
+            Text("此设备")
+                .font(MoonType.meta)
+                .foregroundStyle(MoonTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct MoonFieldDecoration: View {
+    @Environment(\.displayScale) private var displayScale
+    @ScaledMetric(relativeTo: .footnote) private var localLabelHeight: CGFloat = 16
+
+    var body: some View {
+        GeometryReader { geometry in
+            let center = CGPoint(x: geometry.size.width / 2,
+                                 y: geometry.size.height - localLabelHeight - 57)
+            let radius = max(0, min(geometry.size.width / 2 - 8, center.y - 8))
+            ZStack {
+                // These stationary arcs are decoration, not measured distances.
+                Path { path in
+                    for fraction in [CGFloat(1), 0.82] {
+                        path.move(to: CGPoint(x: center.x - radius * fraction, y: center.y))
+                        path.addArc(center: center, radius: radius * fraction,
+                                    startAngle: .degrees(180), endAngle: .degrees(360), clockwise: false)
+                    }
+                }
+                .stroke(MoonTheme.divider, lineWidth: 1 / displayScale)
+                .accessibilityHidden(true)
+
+                Path { path in
+                    path.addArc(center: center, radius: radius * 0.58,
+                                startAngle: .degrees(180), endAngle: .degrees(360), clockwise: false)
+                }
+                .stroke(MoonTheme.divider, style: StrokeStyle(lineWidth: 1 / displayScale, dash: [2, 7]))
+                .accessibilityHidden(true)
+
+                MoonLocalDevice()
+                    .padding(.bottom, 4)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+struct MoonSendDock: View {
+    let enabled: Bool
+    let onFile: () -> Void
+    let onAlbum: () -> Void
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        let layout = dynamicTypeSize >= .xxxLarge
+            ? AnyLayout(VStackLayout(spacing: 6))
+            : AnyLayout(HStackLayout(spacing: 6))
+        layout {
+            Button(action: onFile) {
+                dockLabel("选择文件", symbol: "folder")
+                    .foregroundStyle(enabled ? MoonTheme.onInk : MoonTheme.textSecondary)
+                    .background(enabled ? MoonTheme.ink : MoonTheme.surfaceMuted)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+            .accessibilityLabel("选择文件发送")
+
+            Button(action: onAlbum) {
+                dockLabel("相册", symbol: "photo.on.rectangle")
+                    .foregroundStyle(enabled ? MoonTheme.textPrimary : MoonTheme.textSecondary)
+            }
+            .accessibilityLabel("从相册发送")
+        }
+        .buttonStyle(MoonPressStyle())
+        .disabled(!enabled)
+        .padding(7)
+        .background(MoonTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private func dockLabel(_ title: String, symbol: String) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: symbol)
+                .accessibilityHidden(true)
+            Text(title)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(MoonType.button)
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, minHeight: 56)
+        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
 
@@ -192,51 +413,84 @@ struct MoonTransferCard: View {
 
     let mode: Mode
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: symbol)
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(accent)
-                Text(title)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(titleColor)
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                if let percent {
-                    Text("\(percent)%")
-                        .font(.title3.weight(.bold))
-                        .monospacedDigit()
-                        .foregroundStyle(MoonTheme.primaryStrong)
-                }
-            }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.displayScale) private var displayScale
+    @ScaledMetric(relativeTo: .title) private var percentageSize: CGFloat = 34
+    @ScaledMetric(relativeTo: .title) private var ringDiameter: CGFloat = 154
 
-            if let progress {
-                ProgressView(value: progress)
-                    .tint(MoonTheme.primary)
-            }
+    var body: some View {
+        VStack(spacing: 0) {
+            ring
+
+            Text(title)
+                .font(MoonType.body.weight(.medium))
+                .foregroundStyle(titleColor)
+                .padding(.top, 18)
 
             Text(detail)
-                .font(.caption)
+                .font(MoonType.meta)
                 .foregroundStyle(MoonTheme.textSecondary)
-                .lineLimit(2)
+                .padding(.top, 8)
 
             if let warning {
                 Text(warning)
-                    .font(.caption)
+                    .font(MoonType.meta)
                     .foregroundStyle(MoonTheme.warningText)
+                    .padding(.top, 14)
             }
         }
-        .padding(.vertical, 4)
+        .multilineTextAlignment(.center)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 24)
+        .frame(maxWidth: .infinity, minHeight: 330)
         .accessibilityElement(children: .combine)
+        .transition(reduceMotion ? .identity : .opacity)
+        .transaction { transaction in
+            if reduceMotion {
+                transaction.animation = nil
+                transaction.disablesAnimations = true
+            }
+        }
+    }
+
+    private var ring: some View {
+        ZStack {
+            Circle()
+                .stroke(MoonTheme.divider, lineWidth: 1 / displayScale)
+                .accessibilityHidden(true)
+
+            if let progress {
+                Circle()
+                    .trim(from: 0, to: CGFloat(progress))
+                    .stroke(accent, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .animation(reduceMotion ? nil : .linear(duration: 0.18), value: progress)
+                    .accessibilityHidden(true)
+            }
+
+            if let percent {
+                Text("\(percent)%")
+                    .font(.system(size: percentageSize, weight: .regular))
+                    .monospacedDigit()
+                    .foregroundStyle(MoonTheme.textPrimary)
+            } else {
+                Image(systemName: symbol)
+                    .font(.system(size: percentageSize, weight: .regular))
+                    .foregroundStyle(accent)
+                    .accessibilityHidden(true)
+            }
+        }
+        .aspectRatio(1, contentMode: .fit)
+        .frame(maxWidth: ringDiameter)
     }
 
     private var symbol: String {
         switch mode {
         case .sending: return "paperplane"
-        case .receiving: return "arrow.down.circle"
+        case .receiving: return "arrow.down"
         case .finished(_, let isError):
-            return isError ? "exclamationmark.circle" : "checkmark.circle"
+            return isError ? "exclamationmark" : "checkmark"
         }
     }
 
@@ -253,10 +507,10 @@ struct MoonTransferCard: View {
         case .sending: return "正在发送"
         case .receiving: return "正在接收"
         case .finished(let detail, let isError):
+            if isError { return detail.hasPrefix("发送失败") ? "发送失败" : "操作失败" }
             if detail.hasPrefix("已发送") { return "发送完成" }
-            if detail.hasPrefix("发送失败") { return "发送失败" }
             if detail.hasPrefix("已接收") { return "接收完成" }
-            return isError ? "操作失败" : "完成"
+            return "完成"
         }
     }
 
@@ -269,18 +523,14 @@ struct MoonTransferCard: View {
     }
 
     private var percent: Int? {
-        switch mode {
-        case .sending(let progress, _, _), .receiving(let progress, _):
-            return Int((progress * 100).rounded())
-        case .finished:
-            return nil
-        }
+        progress.map { Int(($0 * 100).rounded()) }
     }
 
     private var progress: Double? {
         switch mode {
         case .sending(let progress, _, _), .receiving(let progress, _):
-            return progress
+            // Render the supplied value, including decreases; never infer completion.
+            return progress.isNaN ? 0 : min(max(progress, 0), 1)
         case .finished:
             return nil
         }
@@ -307,47 +557,45 @@ struct MoonTransferCard: View {
 // MARK: - 发送选项
 
 struct SendOptionsSheet: View {
+    @Environment(\.dismiss) private var dismiss
     let peer: Peer
     let onSelect: (MoonSendAction) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("发送到 \(peer.name)")
-                    .font(.headline)
-                    .foregroundStyle(MoonTheme.textPrimary)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(MoonTheme.textSecondary)
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(peer.name)
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(MoonTheme.textPrimary)
+                        Text(subtitle)
+                            .font(MoonType.meta)
+                            .foregroundStyle(MoonTheme.textSecondary)
+                    }
+                    MoonPrimaryButton(title: "选择文件") { onSelect(.file) }
+                    Button {
+                        onSelect(.album)
+                    } label: {
+                        Label("从相册发送", systemImage: "photo.on.rectangle")
+                            .font(MoonType.button)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                }
+                .padding(20)
             }
-
-            Button {
-                onSelect(.file)
-            } label: {
-                Label("选择文件", systemImage: "doc.badge.plus")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(MoonTheme.onPrimary)
-                    .frame(maxWidth: .infinity)
+            .background(MoonTheme.canvas)
+            .navigationTitle("发送到")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-
-            Button {
-                onSelect(.album)
-            } label: {
-                Label("从相册发送", systemImage: "photo.on.rectangle")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 26)
-        .padding(.bottom, 12)
-        .presentationDetents([.height(300)])
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
 
@@ -443,7 +691,7 @@ struct ConnectionSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
 
@@ -478,5 +726,190 @@ struct ConnectionSheet: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             copied = false
         }
+    }
+}
+
+enum MoonType {
+    static let hero = Font.headline
+    static let title = Font.body
+    static let body = Font.callout
+    static let meta = Font.footnote
+    static let label = Font.caption
+    static let numeric = Font.title.weight(.semibold)
+    static let button = Font.callout.weight(.semibold)
+}
+
+enum MoonTrack {
+    static let tight: CGFloat = -0.4
+    static let wide: CGFloat = 0
+}
+
+struct MoonPanel<Content: View>: View {
+    var padding: CGFloat = 20
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        content()
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(MoonTheme.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+}
+
+struct MoonHairline: View {
+    @Environment(\.displayScale) private var displayScale
+    var inset: CGFloat = 0
+
+    var body: some View {
+        Rectangle()
+            .fill(MoonTheme.divider)
+            .frame(height: 1 / displayScale)
+            .padding(.leading, inset)
+            .accessibilityHidden(true)
+    }
+}
+
+struct MoonSectionLabel<Accessory: View>: View {
+    let text: String
+    @ViewBuilder var accessory: () -> Accessory
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(text)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(MoonTheme.textPrimary)
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 0)
+            accessory()
+        }
+    }
+}
+
+extension MoonSectionLabel where Accessory == EmptyView {
+    init(_ text: String) {
+        self.init(text: text) { EmptyView() }
+    }
+}
+
+struct MoonListRow<Accessory: View>: View {
+    let symbol: String
+    let title: String
+    var subtitle: String?
+    var iconTint: Color = MoonTheme.textSecondary
+    @ViewBuilder var accessory: () -> Accessory
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Image(systemName: symbol)
+                .font(.system(size: 22, weight: .regular))
+                .foregroundStyle(iconTint)
+                .frame(width: 24, height: 28)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title)
+                    .font(MoonType.title.weight(.medium))
+                    .foregroundStyle(MoonTheme.textPrimary)
+                    .lineLimit(2)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(MoonType.meta)
+                        .foregroundStyle(MoonTheme.textSecondary)
+                        .lineLimit(2)
+                }
+            }
+            Spacer(minLength: 0)
+            accessory()
+        }
+        .padding(.vertical, 14)
+        .frame(minHeight: 72)
+        .contentShape(Rectangle())
+    }
+}
+
+extension MoonListRow where Accessory == EmptyView {
+    init(symbol: String, title: String, subtitle: String? = nil,
+         iconTint: Color = MoonTheme.textSecondary) {
+        self.init(symbol: symbol, title: title, subtitle: subtitle, iconTint: iconTint) {
+            EmptyView()
+        }
+    }
+}
+
+struct MoonPrimaryButton: View {
+    let title: String
+    var enabled: Bool = true
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(MoonType.button)
+                .foregroundStyle(enabled ? MoonTheme.onPrimary : MoonTheme.textTertiary)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .background(enabled ? MoonTheme.primary : MoonTheme.surfaceMuted)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(MoonPressStyle())
+        .disabled(!enabled)
+    }
+}
+
+struct MoonPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.opacity(configuration.isPressed ? 0.72 : 1)
+    }
+}
+
+/// 次级文字动作：无底、居中、安静。
+struct MoonTextAction: View {
+    let title: String
+    var enabled: Bool = true
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(MoonType.body.weight(.medium))
+                .foregroundStyle(enabled ? MoonTheme.textSecondary : MoonTheme.textTertiary)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+    }
+}
+
+struct MoonStatusDot: View {
+    let color: Color
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: 6, height: 6)
+            .frame(width: 16, height: 16)
+            .accessibilityHidden(true)
+    }
+}
+
+/// 圆形图标按钮。中性色，不抢戏。
+struct MoonCircleButton: View {
+    let symbol: String
+    let label: String
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(MoonTheme.textSecondary)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 }
