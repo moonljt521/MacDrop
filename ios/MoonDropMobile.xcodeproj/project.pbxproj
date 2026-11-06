@@ -7,12 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		06D6DC69F77CFEB251A81566 /* MoonPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = D398126EC43E58BAC93808DC /* MoonPreferences.swift */; };
 		0FB128E84001C560F9AD19E5 /* TransferClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D13AD2CFEAADF9CC0AA4A90 /* TransferClient.swift */; };
 		226A12F0643CFAC19FE3627D /* MoonTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3119C80177161AEBAA4C3CF9 /* MoonTheme.swift */; };
 		3334FBDC1305BB5D5C8BF2D5 /* PickedMedia.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C819F9CB8B46CA2EB3B792E /* PickedMedia.swift */; };
 		369D9F25E3A90F9C9F0A6B5B /* MoonDropApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F8E728517806DB841C006DA /* MoonDropApp.swift */; };
 		36B1C77B04CA4D531B33B3AC /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 860981DB9FEFDADBAA740D7C /* ContentView.swift */; };
 		447E2FEF4746F495F7E12B95 /* TransferClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D13AD2CFEAADF9CC0AA4A90 /* TransferClient.swift */; };
+		49905A5B7EA388C4221CFBEB /* MoonPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = D398126EC43E58BAC93808DC /* MoonPreferences.swift */; };
 		51BF291E6C3E831CAE6D4FDB /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31BCD6740F3D4317281A2C41 /* Models.swift */; };
 		5EA62E69DC85947BDB44FE9A /* TransferServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59E4503850C120000F88B8FA /* TransferServer.swift */; };
 		7CC560789C6D0A522F9C4AAB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F239E0557DE8A4BF65CFE1D7 /* Assets.xcassets */; };
@@ -72,6 +74,7 @@
 		9D13AD2CFEAADF9CC0AA4A90 /* TransferClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferClient.swift; sourceTree = "<group>"; };
 		A380154261EC3B3E293DAB9B /* SubnetScan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubnetScan.swift; sourceTree = "<group>"; };
 		D035017CE9D5633355C83D14 /* QuickLookPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickLookPreview.swift; sourceTree = "<group>"; };
+		D398126EC43E58BAC93808DC /* MoonPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoonPreferences.swift; sourceTree = "<group>"; };
 		F239E0557DE8A4BF65CFE1D7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F9BD9983767689966A48E4FD /* HTTPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPServer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -116,6 +119,7 @@
 			children = (
 				70004AC12CE265A4BC2BD7DB /* AppModel.swift */,
 				860981DB9FEFDADBAA740D7C /* ContentView.swift */,
+				D398126EC43E58BAC93808DC /* MoonPreferences.swift */,
 				3119C80177161AEBAA4C3CF9 /* MoonTheme.swift */,
 				D035017CE9D5633355C83D14 /* QuickLookPreview.swift */,
 			);
@@ -239,6 +243,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				51BF291E6C3E831CAE6D4FDB /* Models.swift in Sources */,
+				06D6DC69F77CFEB251A81566 /* MoonPreferences.swift in Sources */,
 				D4A279E41A3E95A3D2631733 /* PeerBrowser.swift in Sources */,
 				831A75CEA716171189B5C140 /* ShareViewController.swift in Sources */,
 				0FB128E84001C560F9AD19E5 /* TransferClient.swift in Sources */,
@@ -255,6 +260,7 @@
 				8E8C7E6F9EEDC290ED91FFC4 /* HTTPServer.swift in Sources */,
 				DE5815A3467BD28A605BE71E /* Models.swift in Sources */,
 				369D9F25E3A90F9C9F0A6B5B /* MoonDropApp.swift in Sources */,
+				49905A5B7EA388C4221CFBEB /* MoonPreferences.swift in Sources */,
 				226A12F0643CFAC19FE3627D /* MoonTheme.swift in Sources */,
 				DE7C21C89B25BF411F88279B /* PeerBrowser.swift in Sources */,
 				AC4AA8B2C14DC897027332A9 /* PhotoSaver.swift in Sources */,

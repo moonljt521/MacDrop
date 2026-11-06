@@ -9,7 +9,9 @@ import android.widget.TextView
 
 class MoonUi(val context: Context) {
 
-    private val resources = context.applicationContext.resources
+    // 用传入 Context 自己的资源：MainActivity 会按语言/外观覆盖 Configuration，
+    // 应用级 Context 读不到那份覆盖，深色判断会永远跟着系统走。
+    private val resources = context.resources
 
     val isDark: Boolean =
         (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==

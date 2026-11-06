@@ -2,6 +2,7 @@ package com.macdrop.mobile.net
 
 import android.content.ContentResolver
 import android.net.Uri
+import com.macdrop.mobile.ui.MoonStrings
 import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -121,7 +122,7 @@ class TransferClient {
                                     }
                                     offset += filled
                                 }
-                            } ?: throw IOException("无法读取 ${file.name}")
+                            } ?: throw IOException(MoonStrings.f("无法读取 %s", file.name))
                         } catch (t: Throwable) {
                             error.compareAndSet(null, t)
                             aborted.set(true)
@@ -162,7 +163,7 @@ class TransferClient {
         val temp = File(tempDir, file.name)
         resolver.openInputStream(file.uri)?.use { input ->
             temp.outputStream().use { output -> input.copyTo(output) }
-        } ?: throw IOException("无法读取 ${file.name}")
+        } ?: throw IOException(MoonStrings.f("无法读取 %s", file.name))
         return OutgoingFile(
             uri = Uri.fromFile(temp),
             name = file.name,
@@ -196,8 +197,10 @@ class TransferClient {
             }
             if (round == 0) Thread.sleep(400)
         }
-        val reason = lastError?.message ?: "无法连接对端"
-        throw IOException("$reason（对方可能在后台或已离线，请在对方屏幕上打开 MoonDrop）")
+        val reason = lastError?.message ?: MoonStrings.t("无法连接对端")
+        throw IOException(MoonStrings.f(
+            "%s（对方可能在后台或已离线，请在对方屏幕上打开 MoonDrop）", reason
+        ))
     }
 
     private fun announceOnce(base: String, transferID: String, file: OutgoingFile, root: String?) {

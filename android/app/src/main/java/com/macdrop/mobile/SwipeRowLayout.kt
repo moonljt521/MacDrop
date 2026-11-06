@@ -8,6 +8,7 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.widget.FrameLayout
 import android.widget.TextView
+import com.macdrop.mobile.ui.MoonStrings
 import kotlin.math.abs
 
 /**
@@ -20,7 +21,7 @@ class SwipeRowLayout(context: Context) : FrameLayout(context) {
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
 
     private val deleteView = TextView(context).apply {
-        text = "删除"
+        text = MoonStrings.t("删除")
         textSize = 14f
         setTextColor(Color.WHITE)
         gravity = Gravity.CENTER

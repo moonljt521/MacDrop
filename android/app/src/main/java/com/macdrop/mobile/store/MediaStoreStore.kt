@@ -7,6 +7,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
 import com.macdrop.mobile.net.NetUtil
+import com.macdrop.mobile.ui.MoonStrings
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -135,11 +136,11 @@ class MediaStoreStore(context: Context) {
             else -> MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         }
         val uri = resolver.insert(collection, values)
-            ?: throw IOException("无法创建接收文件")
+            ?: throw IOException(MoonStrings.t("无法创建接收文件"))
 
         try {
             val output = resolver.openOutputStream(uri)
-                ?: throw IOException("无法写入接收文件")
+                ?: throw IOException(MoonStrings.t("无法写入接收文件"))
             output.use { sink ->
                 staging.inputStream().use { source -> source.copyTo(sink) }
             }
@@ -175,7 +176,7 @@ class MediaStoreStore(context: Context) {
                 MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
             mime.startsWith("video/") ->
                 MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-            else -> throw IOException("只有图片和视频能存入相册")
+            else -> throw IOException(MoonStrings.t("只有图片和视频能存入相册"))
         }
         val directory = if (mime.startsWith("image/")) {
             GallerySettings.IMAGE_DIR
@@ -190,19 +191,19 @@ class MediaStoreStore(context: Context) {
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
         val uri = resolver.insert(collection, values)
-            ?: throw IOException("无法在相册目录创建文件")
+            ?: throw IOException(MoonStrings.t("无法在相册目录创建文件"))
         try {
             val source = resolver.openInputStream(entry.uri)
-                ?: throw IOException("无法读取已收到的文件")
+                ?: throw IOException(MoonStrings.t("无法读取已收到的文件"))
             val sink = resolver.openOutputStream(uri)
-                ?: throw IOException("无法写入相册目录")
+                ?: throw IOException(MoonStrings.t("无法写入相册目录"))
             source.use { input -> sink.use { output -> input.copyTo(output) } }
             resolver.update(uri, ContentValues().apply {
                 put(MediaStore.MediaColumns.IS_PENDING, 0)
             }, null, null)
             // 只留一份：副本发布成功后立刻删掉下载目录里的原件
             if (resolver.delete(entry.uri, null, null) == 0) {
-                throw IOException("无法移除下载目录里的原件")
+                throw IOException(MoonStrings.t("无法移除下载目录里的原件"))
             }
             return uri
         } catch (error: Exception) {

@@ -44,6 +44,7 @@ struct QuickLookPreview: UIViewControllerRepresentable {
 struct QuickLookSheet: View {
     let url: URL
 
+    @ObservedObject private var prefs = MoonPreferences.shared
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -61,7 +62,7 @@ struct QuickLookSheet: View {
             }
             .padding(.top, 12)
             .padding(.trailing, 14)
-            .accessibilityLabel("关闭预览")
+            .accessibilityLabel(moonT("关闭预览"))
         }
     }
 }
@@ -70,6 +71,7 @@ struct FolderBrowserView: View {
     let url: URL
     let store: FileStore
 
+    @ObservedObject private var prefs = MoonPreferences.shared
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -77,7 +79,7 @@ struct FolderBrowserView: View {
             FolderContentsView(url: url, store: store)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("关闭") { dismiss() }
+                        Button(moonT("关闭")) { dismiss() }
                     }
                 }
         }

@@ -27,7 +27,7 @@ struct PickedMedia: Transferable {
     private static func copyToTemp(_ source: URL) -> URL {
         let ext = source.pathExtension.isEmpty ? "jpg" : source.pathExtension
         let dest = FileManager.default.temporaryDirectory
-            .appendingPathComponent("相册-\(UUID().uuidString).\(ext)")
+            .appendingPathComponent(moonTF("相册-%@.%@", UUID().uuidString, ext))
         do {
             try FileManager.default.copyItem(at: source, to: dest)
             return dest

@@ -16,6 +16,8 @@ import com.macdrop.mobile.net.ReceiverRuntime
 import com.macdrop.mobile.net.ReceiverServer
 import com.macdrop.mobile.store.GallerySettings
 import com.macdrop.mobile.store.MediaStoreStore
+import com.macdrop.mobile.ui.MoonPrefs
+import com.macdrop.mobile.ui.MoonStrings
 
 /**
  * 前台服务：应用切到后台/锁屏后仍能继续接收文件。
@@ -37,11 +39,15 @@ class ReceiverService : Service() {
     override fun onCreate() {
         super.onCreate()
 
+        // 进程重启后服务可能比 Activity 先起来，通知文案得自己读一次偏好
+        MoonPrefs.init(this)
+        MoonStrings.language = MoonPrefs.language
+
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
-                getString(R.string.notification_channel),
+                MoonStrings.t("文件接收"),
                 NotificationManager.IMPORTANCE_LOW
             )
         )
@@ -56,7 +62,7 @@ class ReceiverService : Service() {
         receiver.onProgress = { fraction, name ->
             ReceiverRuntime.receiving = true
             ReceiverRuntime.progress = fraction
-            ReceiverRuntime.statusText = "接收中 ${(fraction * 100).toInt()}% · $name"
+            ReceiverRuntime.statusText = MoonStrings.f("接收中 %d%% · %s", (fraction * 100).toInt(), name)
             ReceiverRuntime.notifyChanged()
         }
         receiver.onFinished = { entry ->
@@ -65,9 +71,9 @@ class ReceiverService : Service() {
             ReceiverRuntime.statusText = ""
             // 媒体在 save() 里就已经落到相册目录，这里只如实反馈，不再复制第二份
             ReceiverRuntime.lastResult = if (GallerySettings.isInGallery(entry.relativePath)) {
-                "已接收并存入相册：${entry.name}"
+                MoonStrings.f("已接收并存入相册：%s", entry.name)
             } else {
-                "已接收：${entry.name}"
+                MoonStrings.f("已接收：%s", entry.name)
             }
             ReceiverRuntime.notifyChanged()
         }
@@ -216,13 +222,13 @@ class ReceiverService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val text = if (port > 0) {
-            "监听端口 $port · 等待接收文件"
+            MoonStrings.f("监听端口 %d · 等待接收文件", port)
         } else {
-            getString(R.string.notification_text)
+            MoonStrings.t("等待局域网内的设备发送文件")
         }
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_moondrop)
-            .setContentTitle(getString(R.string.notification_title))
+            .setContentTitle(MoonStrings.t("MoonDrop 正在接收文件"))
             .setContentText(text)
             .setContentIntent(pending)
             .setOngoing(true)
@@ -251,12 +257,12 @@ class ReceiverService : Service() {
 
     /** 把 NsdManager 的失败码翻译成人话，直接显示在「本机」卡片上 */
     private fun describeFailure(errorCode: Int): String = when (errorCode) {
-        NsdManager.FAILURE_ALREADY_ACTIVE -> "注册失败：服务名已被占用（会自动换个名字重试）"
-        NsdManager.FAILURE_BAD_PARAMETERS -> "注册失败：参数不合法（服务名可能含不支持的字符）"
-        NsdManager.FAILURE_INTERNAL_ERROR -> "注册失败：系统内部错误"
-        NsdManager.FAILURE_MAX_LIMIT -> "注册失败：超过系统上限"
-        NsdManager.FAILURE_OPERATION_NOT_RUNNING -> "注册失败：操作未在运行"
-        else -> "注册失败：代码 $errorCode"
+        NsdManager.FAILURE_ALREADY_ACTIVE -> MoonStrings.t("注册失败：服务名已被占用（会自动换个名字重试）")
+        NsdManager.FAILURE_BAD_PARAMETERS -> MoonStrings.t("注册失败：参数不合法（服务名可能含不支持的字符）")
+        NsdManager.FAILURE_INTERNAL_ERROR -> MoonStrings.t("注册失败：系统内部错误")
+        NsdManager.FAILURE_MAX_LIMIT -> MoonStrings.t("注册失败：超过系统上限")
+        NsdManager.FAILURE_OPERATION_NOT_RUNNING -> MoonStrings.t("注册失败：操作未在运行")
+        else -> MoonStrings.f("注册失败：代码 %d", errorCode)
     }
 
     companion object {

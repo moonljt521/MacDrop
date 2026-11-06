@@ -33,18 +33,18 @@ enum PhotoSaver {
         }
 
         guard let kind = kind(for: url) else {
-            fail(600, "只有图片和视频能存入相册")
+            fail(600, moonT("只有图片和视频能存入相册"))
             return
         }
         guard FileManager.default.fileExists(atPath: url.path) else {
-            fail(601, "文件已不存在")
+            fail(601, moonT("文件已不存在"))
             return
         }
 
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
             // .limited 对「仅添加」同样可用
             guard status == .authorized || status == .limited else {
-                fail(603, "没有相册写入权限，请在「设置 → MoonDrop → 照片」里允许")
+                fail(603, moonT("没有相册写入权限，请在「设置 → MoonDrop → 照片」里允许"))
                 return
             }
             PHPhotoLibrary.shared().performChanges({
@@ -57,7 +57,7 @@ enum PhotoSaver {
                 } else {
                     MobileLog.write("存入相册失败：\(error?.localizedDescription ?? "未知")")
                     finish(.failure(error ?? NSError(domain: "MoonDropMobile", code: 602,
-                                                     userInfo: [NSLocalizedDescriptionKey: "存入相册失败"])))
+                                                     userInfo: [NSLocalizedDescriptionKey: moonT("存入相册失败")])))
                 }
             })
         }

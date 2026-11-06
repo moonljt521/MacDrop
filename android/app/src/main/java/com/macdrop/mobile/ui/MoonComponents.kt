@@ -677,7 +677,7 @@ private class MoonPeerButton(private val ui: MoonUi, device: MoonNearbyDevice) :
         background = moonRippleBackground(ui, ui.colors.primary)
         isClickable = true
         isFocusable = true
-        contentDescription = "发送到 ${device.name}，${device.connection}"
+        contentDescription = MoonStrings.f("发送到 %s，%s", device.name, device.connection)
         addView(glyph)
         addView(labels)
         setOnClickListener { device.onClick() }
@@ -746,14 +746,14 @@ private class MoonOrbitLayout(private val ui: MoonUi) : ViewGroup(ui.context) {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER_HORIZONTAL
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
-        contentDescription = "此设备"
+        contentDescription = MoonStrings.t("此设备")
         addView(FrameLayout(context).apply {
             background = moonRounded(ui, ui.colors.surfaceMuted, 999)
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
             addView(moonIcon(ui, R.drawable.ic_moon_device, 30, ui.colors.primary),
                 FrameLayout.LayoutParams(ui.dp(30), ui.dp(30), Gravity.CENTER))
         }, LinearLayout.LayoutParams(ui.dp(78), ui.dp(78)))
-        addView(moonText(ui, "此设备", 12f, ui.colors.textSecondary).apply {
+        addView(moonText(ui, MoonStrings.t("此设备"), 12f, ui.colors.textSecondary).apply {
             gravity = Gravity.CENTER
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         }, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
@@ -763,10 +763,10 @@ private class MoonOrbitLayout(private val ui: MoonUi) : ViewGroup(ui.context) {
     private val empty = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER_HORIZONTAL
-        addView(moonText(ui, "等待设备出现", 17f, ui.colors.textPrimary, ui.medium).apply {
+        addView(moonText(ui, MoonStrings.t("等待设备出现"), 17f, ui.colors.textPrimary, ui.medium).apply {
             gravity = Gravity.CENTER
         })
-        addView(moonText(ui, "在另一台设备上打开 MoonDrop\n同一 Wi-Fi 下自动发现", 13f, ui.colors.textSecondary).apply {
+        addView(moonText(ui, MoonStrings.t("在另一台设备上打开 MoonDrop\n同一 Wi-Fi 下自动发现"), 13f, ui.colors.textSecondary).apply {
             gravity = Gravity.CENTER
             setLineSpacing(0f, 1.35f)
             setPadding(0, ui.dp(8), 0, 0)
@@ -1031,7 +1031,7 @@ class MoonSheet(
             },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         )
-        titleRow.addView(moonIconButton(ui, R.drawable.ic_moon_close, "关闭") { dismiss() })
+        titleRow.addView(moonIconButton(ui, R.drawable.ic_moon_close, MoonStrings.t("关闭")) { dismiss() })
         root.addView(titleRow)
 
         val scroller = MaxHeightScrollView(context).apply {

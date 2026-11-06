@@ -38,7 +38,7 @@ final class FileStore {
         guard size == expectedSize else {
             try? fm.removeItem(at: staging)
             throw NSError(domain: "MoonDropMobile", code: 500, userInfo: [
-                NSLocalizedDescriptionKey: "文件不完整：已收 \(size) / \(expectedSize) 字节"
+                NSLocalizedDescriptionKey: moonTF("文件不完整：已收 %lld / %lld 字节", size, expectedSize)
             ])
         }
 

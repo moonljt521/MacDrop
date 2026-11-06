@@ -135,7 +135,7 @@ final class AppModel: ObservableObject {
                     self.refreshReceived()
                 case .failure(let error):
                     MobileLog.write("接收服务启动失败：\(error)")
-                    self.resultText = "接收服务启动失败：\(error.localizedDescription)"
+                    self.resultText = moonTF("接收服务启动失败：%@", error.localizedDescription)
                     self.resultIsError = true
                 }
             }
@@ -283,7 +283,7 @@ final class AppModel: ObservableObject {
             self.autoPickerPending = false
             guard self.pendingCount > 0 else { return }
             if self.peers.isEmpty {
-                self.reportError("待发送文件已就绪，但没有发现其他设备。请确认对方已打开 MoonDrop。")
+                self.reportError(moonT("待发送文件已就绪，但没有发现其他设备。请确认对方已打开 MoonDrop。"))
             } else {
                 self.sendPending()
             }
@@ -306,11 +306,11 @@ final class AppModel: ObservableObject {
     func addManualPeer(host: String, portText: String, name: String) async -> Bool {
         let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedHost.isEmpty, let port = UInt16(portText), port > 0 else {
-            manualError = "请填写有效的 IP 地址和端口"
+            manualError = moonT("请填写有效的 IP 地址和端口")
             return false
         }
         guard let url = URL(string: "http://\(trimmedHost):\(port)/macdrop/ping") else {
-            manualError = "地址格式不正确"
+            manualError = moonT("地址格式不正确")
             return false
         }
 
@@ -334,7 +334,7 @@ final class AppModel: ObservableObject {
             manualError = nil
             return true
         } catch {
-            manualError = "连不上 \(trimmedHost):\(port)，确认对端已运行且在同一局域网"
+            manualError = moonTF("连不上 %@:%d，确认对端已运行且在同一局域网", trimmedHost, Int(port))
             return false
         }
     }
@@ -353,7 +353,7 @@ final class AppModel: ObservableObject {
             browser.advertise(name: trimmed, port: listenPort)
         }
         MobileLog.write("本机改名为 \(trimmed)，已重新广播")
-        resultText = "已改名为「\(trimmed)」"
+        resultText = moonTF("已改名为「%@」", trimmed)
         resultIsError = false
     }
 
@@ -377,8 +377,8 @@ final class AppModel: ObservableObject {
             }
             self.manualError = nil
             self.resultText = found.isEmpty
-                ? "扫描完成：没有发现设备，网络可能开了客户端隔离"
-                : "扫描到 \(found.count) 台设备"
+                ? moonT("扫描完成：没有发现设备，网络可能开了客户端隔离")
+                : moonTP("扫描到 %d 台设备", found.count)
             self.resultIsError = found.isEmpty
             MobileLog.write("扫描命中 \(found.count) 台")
         }
@@ -395,7 +395,7 @@ final class AppModel: ObservableObject {
             return
         }
         guard !peers.isEmpty else {
-            reportError("没有可用设备")
+            reportError(moonT("没有可用设备"))
             return
         }
         queuedPickedURLs = urls
@@ -455,7 +455,7 @@ final class AppModel: ObservableObject {
     func sendPending() {
         guard !pendingURLs.isEmpty, !sending else { return }
         guard !peers.isEmpty else {
-            reportError("没有可用设备")
+            reportError(moonT("没有可用设备"))
             return
         }
         queuedPickedURLs = []
@@ -501,7 +501,7 @@ final class AppModel: ObservableObject {
         autoPickerPending = false
         autoPickerTimeout?.cancel()
         autoPickerTimeout = nil
-        resultText = "已取消"
+        resultText = moonT("已取消")
         resultIsError = false
     }
 
@@ -515,16 +515,16 @@ final class AppModel: ObservableObject {
             for (url, started) in accesses where started {
                 url.stopAccessingSecurityScopedResource()
             }
-            reportError("没有可发送的文件")
+            reportError(moonT("没有可发送的文件"))
             onFinish?(.failure(NSError(domain: "MoonDropMobile", code: 500,
-                                      userInfo: [NSLocalizedDescriptionKey: "没有可发送的文件"])))
+                                      userInfo: [NSLocalizedDescriptionKey: moonT("没有可发送的文件")])))
             return
         }
 
         let totalBytes = files.reduce(Int64(0)) { $0 + $1.size }
         sending = true
         sendProgress = 0
-        sendText = "准备发送…"
+        sendText = moonT("准备发送…")
         sendLargeFile = totalBytes > 100 * 1024 * 1024
         resultText = ""
         resultIsError = false
@@ -540,7 +540,7 @@ final class AppModel: ObservableObject {
                 // 并发时回调可能乱序到达，进度只增不减
                 let fraction = total > 0 ? Double(sent) / Double(total) : 0
                 self.sendProgress = max(self.sendProgress, fraction)
-                self.sendText = "发送中 \(Int(self.sendProgress * 100))% · \(name)"
+                self.sendText = moonTF("发送中 %d%% · %@", Int(self.sendProgress * 100), name)
             }
         }, completion: { [weak self] result in
             for (url, started) in accesses where started {
@@ -556,13 +556,13 @@ final class AppModel: ObservableObject {
                 case .success:
                     self.sendProgress = 1
                     self.sendText = ""
-                    self.resultText = "已发送 \(files.count) 个文件到 \(peer.name)"
+                    self.resultText = moonTP("已发送 %d 个文件到 %@", files.count, peer.name)
                     self.resultIsError = false
                     self.recordSent(names: files.map { $0.relativePath },
                                     target: peer.name, size: totalBytes)
                 case .failure(let error):
                     self.sendText = ""
-                    self.resultText = "发送失败：\(error.localizedDescription)"
+                    self.resultText = moonTF("发送失败：%@", error.localizedDescription)
                     self.resultIsError = true
                 }
                 onFinish?(result)
@@ -586,7 +586,7 @@ final class AppModel: ObservableObject {
     private func handleReceiveProgress(_ fraction: Double, name: String) {
         receiving = true
         receiveProgress = fraction
-        receiveText = "接收中 \(Int(fraction * 100))% · \(name)"
+        receiveText = moonTF("接收中 %d%% · %@", Int(fraction * 100), name)
         beginBackgroundTaskIfNeeded()
     }
 
@@ -594,7 +594,7 @@ final class AppModel: ObservableObject {
         receiving = false
         receiveProgress = 1
         receiveText = ""
-        resultText = "已接收：\(url.lastPathComponent)"
+        resultText = moonTF("已接收：%@", url.lastPathComponent)
         resultIsError = false
         refreshReceived()
         endBackgroundTask()
@@ -604,10 +604,10 @@ final class AppModel: ObservableObject {
                 switch result {
                 case .success:
                     self.markSavedToPhotos(url)
-                    self.resultText = "已接收并存入相册：\(url.lastPathComponent)"
+                    self.resultText = moonTF("已接收并存入相册：%@", url.lastPathComponent)
                     self.resultIsError = false
                 case .failure(let error):
-                    self.resultText = "已接收，但存入相册失败：\(error.localizedDescription)"
+                    self.resultText = moonTF("已接收，但存入相册失败：%@", error.localizedDescription)
                     self.resultIsError = true
                 }
             }
@@ -625,7 +625,7 @@ final class AppModel: ObservableObject {
     /// 手动把已接收的图片/视频存进相册；已经存过的直接拒绝，避免重复插入 PHAsset
     func saveToPhotos(_ item: ReceivedItem) {
         guard !didSaveToPhotos(item) else {
-            resultText = "已经在相册里了：\(item.name)"
+            resultText = moonTF("已经在相册里了：%@", item.name)
             resultIsError = false
             return
         }
@@ -634,7 +634,7 @@ final class AppModel: ObservableObject {
             switch result {
             case .success:
                 self.markSavedToPhotos(item.url)
-                self.resultText = "已存入相册：\(item.name)"
+                self.resultText = moonTF("已存入相册：%@", item.name)
                 self.resultIsError = false
             case .failure(let error):
                 self.reportError(error.localizedDescription)
@@ -744,7 +744,7 @@ final class AppModel: ObservableObject {
                 guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
                 let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
                 let dest = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("相册-\(UUID().uuidString).\(ext)")
+                    .appendingPathComponent(moonTF("相册-%@.%@", UUID().uuidString, ext))
                 do {
                     try data.write(to: dest)
                     urls.append(dest)
@@ -753,7 +753,7 @@ final class AppModel: ObservableObject {
                 }
             }
             guard !urls.isEmpty else {
-                reportError("没能读取所选照片")
+                reportError(moonT("没能读取所选照片"))
                 return
             }
             requestSend(urls: urls, to: peer)

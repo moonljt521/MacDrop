@@ -138,7 +138,7 @@ final class TransferClient {
         try handle.seek(toOffset: UInt64(offset))
         guard let data = try handle.read(upToCount: Int(length)), !data.isEmpty else {
             throw NSError(domain: "MoonDropMobile", code: 500, userInfo: [
-                NSLocalizedDescriptionKey: "读取文件时提前结束"
+                NSLocalizedDescriptionKey: moonT("读取文件时提前结束")
             ])
         }
         return data
@@ -171,7 +171,7 @@ final class TransferClient {
         }
         let reason = (firstError ?? lastError).localizedDescription
         throw NSError(domain: "MoonDropMobile", code: 1, userInfo: [
-            NSLocalizedDescriptionKey: "\(reason)（对方可能在后台或已离线，请在对方屏幕上打开 MoonDrop）"
+            NSLocalizedDescriptionKey: moonTF("%@（对方可能在后台或已离线，请在对方屏幕上打开 MoonDrop）", reason)
         ])
     }
 

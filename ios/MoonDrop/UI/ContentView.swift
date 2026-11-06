@@ -22,6 +22,7 @@ struct ContentView: View {
     }
 
     @EnvironmentObject private var model: AppModel
+    @ObservedObject private var prefs = MoonPreferences.shared
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -58,6 +59,23 @@ struct ContentView: View {
                 ))
         }
         .tint(MoonTheme.primary)
+        .onAppear { applyAppearance(prefs.appearance) }
+        .onChange(of: prefs.appearance) { appearance in
+            applyAppearance(appearance)
+        }
+    }
+
+    private func applyAppearance(_ appearance: MoonAppearance) {
+        let style: UIUserInterfaceStyle = switch appearance {
+        case .system: .unspecified
+        case .light: .light
+        case .dark: .dark
+        }
+        // 窗口级覆盖才能让已经弹出的 sheet 同步换色。
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .forEach { $0.overrideUserInterfaceStyle = style }
     }
 
     private var content: some View {
@@ -105,7 +123,7 @@ struct ContentView: View {
             ToolbarItem(placement: .topBarLeading) { brand }
         }
         ToolbarItem(placement: .topBarTrailing) {
-            MoonCircleButton(symbol: "slider.horizontal.3", label: "设置与更多") {
+            MoonCircleButton(symbol: "slider.horizontal.3", label: moonT("设置与更多")) {
                 sheet = .settings
             }
         }
@@ -163,9 +181,9 @@ struct ContentView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(MoonPressStyle())
-            .accessibilityLabel("连接详情，\(model.deviceName)，\(statusDetail)")
+            .accessibilityLabel(moonTF("连接详情，%@，%@", model.deviceName, statusDetail))
             Spacer(minLength: 0)
-            MoonCircleButton(symbol: "pencil", label: "重命名本机") {
+            MoonCircleButton(symbol: "pencil", label: moonT("重命名本机")) {
                 renameText = model.deviceName
                 showingRename = true
             }
@@ -177,9 +195,9 @@ struct ContentView: View {
     }
 
     private var statusDetail: String {
-        if model.listenPort <= 0 { return "接收启动中" }
-        if model.localAddresses.isEmpty { return "未连接局域网" }
-        return model.isAdvertiseLive ? "可接收" : "广播未上线"
+        if model.listenPort <= 0 { return moonT("接收启动中") }
+        if model.localAddresses.isEmpty { return moonT("未连接局域网") }
+        return model.isAdvertiseLive ? moonT("可接收") : moonT("广播未上线")
     }
 
     private var fieldState: Int {
@@ -192,21 +210,23 @@ struct ContentView: View {
 
     private var fieldTitle: String {
         switch fieldState {
-        case 1: return "文件，正在抵达"
-        case 2: return "接收来自附近"
-        case 3: return "操作结果"
-        case 4: return "准备好，即刻传递"
-        default: return "发送到附近"
+        case 1: return moonT("文件，正在抵达")
+        case 2: return moonT("接收来自附近")
+        case 3: return moonT("操作结果")
+        case 4: return moonT("准备好，即刻传递")
+        default: return moonT("发送到附近")
         }
     }
 
     private var fieldSubtitle: String {
         switch fieldState {
-        case 1, 2: return "设备之间直连，不经过云端"
-        case 3: return "每一次传递，都有迹可循"
-        case 4: return "共享的文件尚未发送，请选择接收设备"
+        case 1, 2: return moonT("设备之间直连，不经过云端")
+        case 3: return moonT("每一次传递，都有迹可循")
+        case 4: return moonT("共享的文件尚未发送，请选择接收设备")
         default:
-            return model.peers.isEmpty ? "打开另一台设备上的 MoonDrop" : "\(model.peers.count) 台设备在附近，轻点开始传递"
+            return model.peers.isEmpty
+                ? moonT("打开另一台设备上的 MoonDrop")
+                : moonTP("%d 台设备在附近，轻点开始传递", model.peers.count)
         }
     }
 
@@ -215,13 +235,13 @@ struct ContentView: View {
             if model.sending {
                 MoonTransferCard(mode: .sending(
                     progress: model.sendProgress,
-                    detail: model.sendText.isEmpty ? "准备发送…" : model.sendText,
+                    detail: model.sendText.isEmpty ? moonT("准备发送…") : model.sendText,
                     large: model.sendLargeFile
                 ))
             } else if model.receiving {
                 MoonTransferCard(mode: .receiving(
                     progress: model.receiveProgress,
-                    detail: model.receiveText.isEmpty ? "接收中…" : model.receiveText
+                    detail: model.receiveText.isEmpty ? moonT("接收中…") : model.receiveText
                 ))
             } else if !model.resultText.isEmpty {
                 MoonTransferCard(mode: .finished(detail: model.resultText, isError: model.resultIsError))
@@ -247,13 +267,13 @@ struct ContentView: View {
                 .frame(width: 104, height: 104)
                 .background(MoonTheme.surface, in: Circle())
                 .accessibilityHidden(true)
-            Text("\(model.pendingCount) 个文件待发送")
+            Text(moonTP("%d 个文件待发送", model.pendingCount))
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(MoonTheme.textPrimary)
-            MoonPrimaryButton(title: "选择设备并发送", enabled: !model.peers.isEmpty && !model.sending) {
+            MoonPrimaryButton(title: moonT("选择设备并发送"), enabled: !model.peers.isEmpty && !model.sending) {
                 model.sendPending()
             }
-            MoonTextAction(title: "取消待发送", enabled: true) { model.cancelPending() }
+            MoonTextAction(title: moonT("取消待发送"), enabled: true) { model.cancelPending() }
         }
         .padding(.vertical, 20)
         .frame(minHeight: 330)
@@ -268,19 +288,19 @@ struct ContentView: View {
                 HStack(spacing: 7) {
                     if model.scanning { ProgressView().controlSize(.small) }
                     else { Image(systemName: "arrow.clockwise") }
-                    Text(model.scanning ? "正在扫描" : "重新扫描")
+                    Text(model.scanning ? moonT("正在扫描") : moonT("重新扫描"))
                 }
                 .frame(minHeight: 44)
             }
             .disabled(model.scanning)
-            .accessibilityLabel("扫描局域网设备")
+            .accessibilityLabel(moonT("扫描局域网设备"))
             Button {
                 model.manualError = nil
                 sheet = .manualPeer
             } label: {
-                Label("手动连接", systemImage: "plus").frame(minHeight: 44)
+                Label(moonT("手动连接"), systemImage: "plus").frame(minHeight: 44)
             }
-            .accessibilityLabel("手动添加设备")
+            .accessibilityLabel(moonT("手动添加设备"))
         }
         .font(MoonType.meta)
         .foregroundStyle(MoonTheme.textSecondary)
@@ -310,7 +330,7 @@ struct ContentView: View {
             HStack(spacing: 10) {
                 Image(systemName: "clock.arrow.circlepath").font(.body).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("最近传输")
+                    Text(moonT("最近传输"))
                         .font(MoonType.meta.weight(.medium))
                         .foregroundStyle(MoonTheme.textPrimary)
                     Text(recentSummary)
@@ -327,20 +347,22 @@ struct ContentView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(MoonPressStyle())
-        .accessibilityLabel("传输记录，\(recentSummary)")
+        .accessibilityLabel(moonTF("传输记录，%@", recentSummary))
     }
 
     private var recentSummary: String {
         let received = model.received.max { $0.modified < $1.modified }
         let sent = model.sentRecords.max { $0.date < $1.date }
         if let received, sent.map({ received.modified >= $0.date }) ?? true {
-            return "已接收 · \(received.name)"
+            return moonTF("已接收 · %@", received.name)
         }
         if let sent {
-            let name = sent.names.count == 1 ? sent.names[0] : "\(sent.names.count) 个文件"
-            return "已发送 · \(name) → \(sent.target)"
+            let name = sent.names.count == 1
+                ? sent.names[0]
+                : moonTF("%d 个文件", sent.names.count)
+            return moonTF("已发送 · %@ → %@", name, sent.target)
         }
-        return "发送与接收记录，都收在这里"
+        return moonT("发送与接收记录，都收在这里")
     }
 
     private func beginSend(_ peer: Peer?, action: MoonSendAction) {
@@ -384,6 +406,7 @@ private struct MoonHistorySheet: View {
     }
 
     @EnvironmentObject private var model: AppModel
+    @ObservedObject private var prefs = MoonPreferences.shared
     @Environment(\.dismiss) private var dismiss
     @State private var historyTab = 1
     @State private var confirmClearSent = false
@@ -394,15 +417,15 @@ private struct MoonHistorySheet: View {
         NavigationStack {
             historyBlock
                 .background(MoonTheme.canvas)
-                .navigationTitle("传输记录")
+                .navigationTitle(moonT("传输记录"))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("关闭") { dismiss() }
+                        Button(moonT("关闭")) { dismiss() }
                     }
                     ToolbarItem(placement: .primaryAction) {
                         if hasHistory {
-                            Button("清空") {
+                            Button(moonT("清空")) {
                                 if historyTab == 1 { confirmClearReceived = true }
                                 else { confirmClearSent = true }
                             }
@@ -415,17 +438,17 @@ private struct MoonHistorySheet: View {
                     case .folder(let url): FolderBrowserView(url: url, store: model.store)
                     }
                 }
-                .alert("清空已发送记录？", isPresented: $confirmClearSent) {
-                    Button("清空记录", role: .destructive) { model.clearSentRecords() }
-                    Button("取消", role: .cancel) {}
+                .alert(moonT("清空已发送记录？"), isPresented: $confirmClearSent) {
+                    Button(moonT("清空记录"), role: .destructive) { model.clearSentRecords() }
+                    Button(moonT("取消"), role: .cancel) {}
                 } message: {
-                    Text("只清列表，已经发出去的文件不受影响。")
+                    Text(moonT("只清列表，已经发出去的文件不受影响。"))
                 }
-                .alert("清空已接收？", isPresented: $confirmClearReceived) {
-                    Button("删除全部已接收文件", role: .destructive) { model.clearReceived() }
-                    Button("取消", role: .cancel) {}
+                .alert(moonT("清空已接收？"), isPresented: $confirmClearReceived) {
+                    Button(moonT("删除全部已接收文件"), role: .destructive) { model.clearReceived() }
+                    Button(moonT("取消"), role: .cancel) {}
                 } message: {
-                    Text("已接收的文件会从「文件 → 我的 iPhone → MoonDrop → Received」里删除，无法恢复。")
+                    Text(moonT("已接收的文件会从「文件 → 我的 iPhone → MoonDrop → Received」里删除，无法恢复。"))
                 }
         }
         .presentationDetents([.large])
@@ -438,14 +461,14 @@ private struct MoonHistorySheet: View {
 
     private var historyBlock: some View {
         VStack(spacing: 0) {
-            Picker("记录类型", selection: $historyTab) {
-                Text("已发送 \(model.sentRecords.count)").tag(0)
-                Text("已接收 \(model.received.count)").tag(1)
+            Picker(moonT("记录类型"), selection: $historyTab) {
+                Text(moonTF("已发送 %d", model.sentRecords.count)).tag(0)
+                Text(moonTF("已接收 %d", model.received.count)).tag(1)
             }
             .pickerStyle(.segmented)
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
-            .accessibilityLabel("记录类型")
+            .accessibilityLabel(moonT("记录类型"))
             if !model.resultText.isEmpty {
                 Label(model.resultText, systemImage: model.resultIsError ? "exclamationmark.circle" : "info.circle")
                     .font(MoonType.meta)
@@ -467,8 +490,8 @@ private struct MoonHistorySheet: View {
     @ViewBuilder
     private var receivedList: some View {
         if model.received.isEmpty {
-            MoonEmptyState(symbol: "folder", title: "还没有接收文件",
-                           message: "其他设备发来的文件会按时间出现在这里")
+            MoonEmptyState(symbol: "folder", title: moonT("还没有接收文件"),
+                           message: moonT("其他设备发来的文件会按时间出现在这里"))
                 .listRowBackground(Color.clear)
         } else {
             ForEach(moonDayGroups(model.received, date: \.modified)) { group in
@@ -484,8 +507,8 @@ private struct MoonHistorySheet: View {
     @ViewBuilder
     private var sentList: some View {
         if model.sentRecords.isEmpty {
-            MoonEmptyState(symbol: "paperplane", title: "还没有发送记录",
-                           message: "发出的文件会按时间出现在这里")
+            MoonEmptyState(symbol: "paperplane", title: moonT("还没有发送记录"),
+                           message: moonT("发出的文件会按时间出现在这里"))
                 .listRowBackground(Color.clear)
         } else {
             ForEach(moonDayGroups(model.sentRecords, date: \.date)) { group in
@@ -515,18 +538,18 @@ private struct MoonHistorySheet: View {
                 Button {
                     open(item)
                 } label: {
-                    Label(item.isDirectory ? "打开文件夹" : "打开", systemImage: "arrow.up.right.square")
+                    Label(item.isDirectory ? moonT("打开文件夹") : moonT("打开"), systemImage: "arrow.up.right.square")
                 }
 
                 ShareLink(item: item.url) {
-                    Label("分享", systemImage: "square.and.arrow.up")
+                    Label(moonT("分享"), systemImage: "square.and.arrow.up")
                 }
 
                 if PhotoSaver.isMedia(item.url), !model.didSaveToPhotos(item) {
                     Button {
                         model.saveToPhotos(item)
                     } label: {
-                        Label("存入相册", systemImage: "square.and.arrow.down")
+                        Label(moonT("存入相册"), systemImage: "square.and.arrow.down")
                     }
                 }
 
@@ -535,7 +558,7 @@ private struct MoonHistorySheet: View {
                 Button(role: .destructive) {
                     model.delete(item)
                 } label: {
-                    Label("删除", systemImage: "trash")
+                    Label(moonT("删除"), systemImage: "trash")
                 }
             } label: {
                 Image(systemName: "ellipsis")
@@ -544,13 +567,13 @@ private struct MoonHistorySheet: View {
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
-            .accessibilityLabel("更多操作")
+            .accessibilityLabel(moonT("更多操作"))
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) {
                 model.delete(item)
             } label: {
-                Label("删除", systemImage: "trash")
+                Label(moonT("删除"), systemImage: "trash")
             }
         }
     }
@@ -558,13 +581,13 @@ private struct MoonHistorySheet: View {
     private func sentRow(_ record: SentRecord) -> some View {
         MoonListRow(
             symbol: fileSymbol(record.names.count == 1 ? record.names[0] : "", isDirectory: false),
-            title: record.names.count == 1 ? record.names[0] : "\(record.names.count) 个文件",
+            title: record.names.count == 1 ? record.names[0] : moonTF("%d 个文件", record.names.count),
             subtitle: "→ \(record.target) · \(Self.sizeText(record.size)) · \(record.date.formatted(date: .omitted, time: .shortened))"
         ) {
             Image(systemName: "checkmark")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(MoonTheme.success)
-                .accessibilityLabel("已发送")
+                .accessibilityLabel(moonT("已发送"))
         }
     }
 
@@ -609,12 +632,18 @@ private struct MoonHistorySheet: View {
 
     private func moonDayTitle(_ day: Date) -> String {
         let calendar = Calendar.current
-        if calendar.isDateInToday(day) { return "今天" }
-        if calendar.isDateInYesterday(day) { return "昨天" }
+        if calendar.isDateInToday(day) { return moonT("今天") }
+        if calendar.isDateInYesterday(day) { return moonT("昨天") }
+        let language = prefs.language
         let formatter = DateFormatter()
-        formatter.locale = .current
+        formatter.locale = language.locale
         let sameYear = calendar.component(.year, from: day) == calendar.component(.year, from: Date())
-        formatter.dateFormat = sameYear ? "M月d日" : "yyyy年M月d日"
+        switch language {
+        case .zhHans:
+            formatter.dateFormat = sameYear ? "M月d日" : "yyyy年M月d日"
+        case .en:
+            formatter.dateFormat = sameYear ? "MMM d" : "MMM d, yyyy"
+        }
         return formatter.string(from: day)
     }
 
@@ -626,6 +655,7 @@ private struct MoonHistorySheet: View {
 /// 设置弹层：设置项、连接详情、帮助都收在这一层，主屏因此只留四件事。
 struct MoonSettingsSheet: View {
     @EnvironmentObject private var model: AppModel
+    @ObservedObject private var prefs = MoonPreferences.shared
     @Environment(\.dismiss) private var dismiss
 
     var onOpenConnection: () -> Void
@@ -635,7 +665,23 @@ struct MoonSettingsSheet: View {
         NavigationStack {
             List {
                 Section {
-                    Toggle("收到的照片自动存入相册", isOn: $model.autoSaveToPhotos)
+                    Picker(moonT("外观"), selection: $prefs.appearance) {
+                        ForEach(MoonAppearance.allCases) { option in
+                            Text(option.displayName).tag(option)
+                        }
+                    }
+                }
+
+                Section {
+                    Picker(moonT("语言"), selection: $prefs.language) {
+                        ForEach(MoonLanguage.allCases) { option in
+                            Text(option.displayName).tag(option)
+                        }
+                    }
+                }
+
+                Section {
+                    Toggle(moonT("收到的照片自动存入相册"), isOn: $model.autoSaveToPhotos)
                         .tint(MoonTheme.primary)
                 }
 
@@ -644,34 +690,36 @@ struct MoonSettingsSheet: View {
                         onOpenConnection()
                         dismiss()
                     } label: {
-                        Label("连接详情", systemImage: "link")
+                        Label(moonT("连接详情"), systemImage: "link")
                     }
 
                     Button {
                         onOpenHelp()
                         dismiss()
                     } label: {
-                        Label("存储位置与常见问题", systemImage: "info")
+                        Label(moonT("存储位置与常见问题"), systemImage: "info")
                     }
                 }
 
                 Section {
                     HStack {
-                        Text("版本")
+                        Text(moonT("版本"))
                         Spacer()
                         Text(version)
                             .foregroundStyle(MoonTheme.textSecondary)
                     }
                 }
             }
+            // Picker 的当前值会缓存选项文字，换语言时重建列表才能同步刷新。
+            .id(prefs.language)
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(MoonTheme.canvas)
-            .navigationTitle("设置")
+            .navigationTitle(moonT("设置"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
+                    Button(moonT("完成")) { dismiss() }
                 }
             }
         }
@@ -693,6 +741,7 @@ private struct MoonDayGroup<Item: Identifiable>: Identifiable {
 struct ManualPeerSheet: View {
 
     @EnvironmentObject private var model: AppModel
+    @ObservedObject private var prefs = MoonPreferences.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var host = ""
@@ -703,14 +752,14 @@ struct ManualPeerSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("对端地址") {
-                    TextField("IP 地址", text: $host)
+                Section(moonT("对端地址")) {
+                    TextField(moonT("IP 地址"), text: $host)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.numbersAndPunctuation)
-                    TextField("端口", text: $port)
+                    TextField(moonT("端口"), text: $port)
                         .keyboardType(.numberPad)
-                    TextField("备注名（可选）", text: $name)
+                    TextField(moonT("备注名（可选）"), text: $name)
                 }
 
                 if let error = model.manualError {
@@ -729,7 +778,7 @@ struct ManualPeerSheet: View {
                             if connecting {
                                 ProgressView()
                             } else {
-                                Text("连接")
+                                Text(moonT("连接"))
                             }
                             Spacer()
                         }
@@ -738,16 +787,16 @@ struct ManualPeerSheet: View {
                 }
 
                 Section {
-                    Text("对端需运行 MoonDrop（Mac / iPhone / Android），并与本机在同一局域网。")
+                    Text(moonT("对端需运行 MoonDrop（Mac / iPhone / Android），并与本机在同一局域网。"))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("手动添加设备")
+            .navigationTitle(moonT("手动添加设备"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button(moonT("取消")) { dismiss() }
                 }
             }
         }
@@ -815,6 +864,7 @@ private struct ContentAttachments: ViewModifier {
 /// 首屏的确认弹窗与结果反馈。
 private struct ContentDialogs: ViewModifier {
     @EnvironmentObject private var model: AppModel
+    @ObservedObject private var prefs = MoonPreferences.shared
     @Binding var showingRename: Bool
     @Binding var renameText: String
     @Binding var photoItems: [PhotosPickerItem]
@@ -822,24 +872,24 @@ private struct ContentDialogs: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .alert("重命名本机", isPresented: $showingRename) {
-                TextField("例如 书房的那台 iPhone", text: $renameText)
+            .alert(moonT("重命名本机"), isPresented: $showingRename) {
+                TextField(moonT("例如 书房的那台 iPhone"), text: $renameText)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                Button("保存") { model.rename(to: renameText) }
-                Button("取消", role: .cancel) {}
+                Button(moonT("保存")) { model.rename(to: renameText) }
+                Button(moonT("取消"), role: .cancel) {}
             } message: {
-                Text("其他设备的 MoonDrop 列表里显示这个名字，最长 24 个字符。")
+                Text(moonT("其他设备的 MoonDrop 列表里显示这个名字，最长 24 个字符。"))
             }
-            .confirmationDialog("发送到哪台设备？",
+            .confirmationDialog(moonT("发送到哪台设备？"),
                                 isPresented: $model.showingDevicePicker,
                                 titleVisibility: .visible) {
                 ForEach(model.peers, id: \.endpoint) { peer in
-                    Button("\(peer.name)（\(peer.host)）") {
+                    Button(moonTF("%@（%@）", peer.name, peer.host)) {
                         model.choosePeer(peer)
                     }
                 }
-                Button("取消", role: .cancel) {
+                Button(moonT("取消"), role: .cancel) {
                     model.cancelDevicePicker()
                 }
             }
@@ -860,11 +910,11 @@ private struct ContentDialogs: ViewModifier {
     }
 
     private func playResultHaptic(for text: String) {
-        let isTransfer = text.hasPrefix("已发送")
-            || text.hasPrefix("发送失败")
-            || text.hasPrefix("已接收")
-            || text.hasPrefix("接收")
-            || text.contains("存入相册")
+        let isTransfer = moonTextMatches(text, key: "已发送")
+            || moonTextMatches(text, key: "发送失败")
+            || moonTextMatches(text, key: "已接收")
+            || moonTextMatches(text, key: "接收")
+            || moonTextMatches(text, key: "存入相册", contains: true)
         guard isTransfer else { return }
         UINotificationFeedbackGenerator().notificationOccurred(model.resultIsError ? .error : .success)
     }

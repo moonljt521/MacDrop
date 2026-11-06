@@ -49,6 +49,8 @@ targets:
       - path: MoonDrop/Core/Models.swift
       - path: MoonDrop/Core/PeerBrowser.swift
       - path: MoonDrop/Core/TransferClient.swift
+      # 分享扩展复用发送端，因此也要编译运行时本地化
+      - path: MoonDrop/UI/MoonPreferences.swift
     entitlements:
       path: MoonDropShare/MoonDropShare.entitlements
       properties:

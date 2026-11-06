@@ -92,6 +92,7 @@ struct MoonPeerField: View {
     let peers: [Peer]
     let onSelect: (Peer) -> Void
 
+    @ObservedObject private var prefs = MoonPreferences.shared
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ScaledMetric(relativeTo: .footnote) private var minimumFieldWidth: CGFloat = 300
@@ -201,10 +202,10 @@ struct MoonPeerField: View {
     private var emptyField: some View {
         VStack(spacing: 24) {
             VStack(spacing: 8) {
-                Text("等待设备出现")
+                Text(moonT("等待设备出现"))
                     .font(.title3.weight(.medium))
                     .foregroundStyle(MoonTheme.textPrimary)
-                Text("在另一台设备上打开 MoonDrop")
+                Text(moonT("在另一台设备上打开 MoonDrop"))
                     .font(MoonType.meta)
                     .foregroundStyle(MoonTheme.textSecondary)
             }
@@ -229,6 +230,8 @@ private struct MoonFieldPeerButton: View {
     var singleLine: Bool = false
     let onSelect: (Peer) -> Void
 
+    @ObservedObject private var prefs = MoonPreferences.shared
+
     var body: some View {
         Button {
             onSelect(peer)
@@ -252,7 +255,7 @@ private struct MoonFieldPeerButton: View {
             }
         }
         .buttonStyle(MoonPressStyle())
-        .accessibilityLabel("发送到 " + peer.name)
+        .accessibilityLabel(moonTF("发送到 %@", peer.name))
         .accessibilityValue(connectionType)
     }
 
@@ -287,12 +290,13 @@ private struct MoonFieldPeerButton: View {
     }
 
     private var connectionType: String {
-        if peer.isManual { return "手动连接" }
-        return peer.isPeerToPeer ? "点对点直连" : "局域网直连"
+        if peer.isManual { return moonT("手动连接") }
+        return peer.isPeerToPeer ? moonT("点对点直连") : moonT("局域网直连")
     }
 }
 
 private struct MoonLocalDevice: View {
+    @ObservedObject private var prefs = MoonPreferences.shared
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
@@ -308,7 +312,7 @@ private struct MoonLocalDevice: View {
                         .padding(-9)
                 }
                 .accessibilityHidden(true)
-            Text("此设备")
+            Text(moonT("此设备"))
                 .font(MoonType.meta)
                 .foregroundStyle(MoonTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -359,6 +363,7 @@ struct MoonSendDock: View {
     let onFile: () -> Void
     let onAlbum: () -> Void
 
+    @ObservedObject private var prefs = MoonPreferences.shared
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -367,18 +372,18 @@ struct MoonSendDock: View {
             : AnyLayout(HStackLayout(spacing: 6))
         layout {
             Button(action: onFile) {
-                dockLabel("选择文件", symbol: "folder")
+                dockLabel(moonT("选择文件"), symbol: "folder")
                     .foregroundStyle(enabled ? MoonTheme.onInk : MoonTheme.textSecondary)
                     .background(enabled ? MoonTheme.ink : MoonTheme.surfaceMuted)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
-            .accessibilityLabel("选择文件发送")
+            .accessibilityLabel(moonT("选择文件发送"))
 
             Button(action: onAlbum) {
-                dockLabel("相册", symbol: "photo.on.rectangle")
+                dockLabel(moonT("相册"), symbol: "photo.on.rectangle")
                     .foregroundStyle(enabled ? MoonTheme.textPrimary : MoonTheme.textSecondary)
             }
-            .accessibilityLabel("从相册发送")
+            .accessibilityLabel(moonT("从相册发送"))
         }
         .buttonStyle(MoonPressStyle())
         .disabled(!enabled)
@@ -413,6 +418,7 @@ struct MoonTransferCard: View {
 
     let mode: Mode
 
+    @ObservedObject private var prefs = MoonPreferences.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.displayScale) private var displayScale
     @ScaledMetric(relativeTo: .title) private var percentageSize: CGFloat = 34
@@ -504,13 +510,15 @@ struct MoonTransferCard: View {
 
     private var title: String {
         switch mode {
-        case .sending: return "正在发送"
-        case .receiving: return "正在接收"
+        case .sending: return moonT("正在发送")
+        case .receiving: return moonT("正在接收")
         case .finished(let detail, let isError):
-            if isError { return detail.hasPrefix("发送失败") ? "发送失败" : "操作失败" }
-            if detail.hasPrefix("已发送") { return "发送完成" }
-            if detail.hasPrefix("已接收") { return "接收完成" }
-            return "完成"
+            if isError {
+                return moonTextMatches(detail, key: "发送失败") ? moonT("发送失败") : moonT("操作失败")
+            }
+            if moonTextMatches(detail, key: "已发送") { return moonT("发送完成") }
+            if moonTextMatches(detail, key: "已接收") { return moonT("接收完成") }
+            return moonT("完成")
         }
     }
 
@@ -547,7 +555,7 @@ struct MoonTransferCard: View {
     private var warning: String? {
         switch mode {
         case .sending(_, _, let large):
-            return large ? "大文件传输中，请保持 MoonDrop 在前台；锁屏或切走会中断。" : nil
+            return large ? moonT("大文件传输中，请保持 MoonDrop 在前台；锁屏或切走会中断。") : nil
         case .receiving, .finished:
             return nil
         }
@@ -558,6 +566,7 @@ struct MoonTransferCard: View {
 
 struct SendOptionsSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var prefs = MoonPreferences.shared
     let peer: Peer
     let onSelect: (MoonSendAction) -> Void
 
@@ -573,11 +582,11 @@ struct SendOptionsSheet: View {
                             .font(MoonType.meta)
                             .foregroundStyle(MoonTheme.textSecondary)
                     }
-                    MoonPrimaryButton(title: "选择文件") { onSelect(.file) }
+                    MoonPrimaryButton(title: moonT("选择文件")) { onSelect(.file) }
                     Button {
                         onSelect(.album)
                     } label: {
-                        Label("从相册发送", systemImage: "photo.on.rectangle")
+                        Label(moonT("从相册发送"), systemImage: "photo.on.rectangle")
                             .font(MoonType.button)
                             .frame(maxWidth: .infinity, minHeight: 44)
                     }
@@ -587,11 +596,11 @@ struct SendOptionsSheet: View {
                 .padding(20)
             }
             .background(MoonTheme.canvas)
-            .navigationTitle("发送到")
+            .navigationTitle(moonT("发送到"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button(moonT("取消")) { dismiss() }
                 }
             }
         }
@@ -601,7 +610,7 @@ struct SendOptionsSheet: View {
 
     private var subtitle: String {
         let address = "\(peer.host):\(peer.port)"
-        return peer.isPeerToPeer ? "点对点直连 · \(address)" : address
+        return peer.isPeerToPeer ? moonTF("点对点直连 · %@", address) : address
     }
 }
 
@@ -609,34 +618,35 @@ struct SendOptionsSheet: View {
 
 struct StorageHelpSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var prefs = MoonPreferences.shared
 
     var body: some View {
         NavigationStack {
             List {
-                Section("收到的文件放在哪") {
-                    Text("普通文件保存在「文件」App → 我的 iPhone → MoonDrop → Received。开启「自动存入相册」后，图片和视频写入系统相册；同一个文件只会存一次，不会重复。")
+                Section(moonT("收到的文件放在哪")) {
+                    Text(moonT("普通文件保存在「文件」App → 我的 iPhone → MoonDrop → Received。开启「自动存入相册」后，图片和视频写入系统相册；同一个文件只会存一次，不会重复。"))
                 }
 
-                Section("看不见设备怎么办") {
-                    Text("确认双方都打开了 MoonDrop，并连在同一个 Wi-Fi。附近的 Apple 设备即使连着别的网络，也会以「点对点」出现；Android 设备必须同一 Wi-Fi。\n\n仍然看不见就扫描局域网，或手动填写对方的 IP 和端口 52345。")
+                Section(moonT("看不见设备怎么办")) {
+                    Text(moonT("确认双方都打开了 MoonDrop，并连在同一个 Wi-Fi。附近的 Apple 设备即使连着别的网络，也会以「点对点」出现；Android 设备必须同一 Wi-Fi。\n\n仍然看不见就扫描局域网，或手动填写对方的 IP 和端口 52345。"))
                 }
 
-                Section("后台接收") {
-                    Text("接收过程中请保持 MoonDrop 在前台，锁屏或长时间切到后台可能中断传输。iPhone 切到后台会停止广播，回到前台会自动恢复。")
+                Section(moonT("后台接收")) {
+                    Text(moonT("接收过程中请保持 MoonDrop 在前台，锁屏或长时间切到后台可能中断传输。iPhone 切到后台会停止广播，回到前台会自动恢复。"))
                 }
 
-                Section("关于") {
-                    Text("MoonDrop \(version) · 局域网直连，不经过云端。")
+                Section(moonT("关于")) {
+                    Text(moonTF("MoonDrop %@ · 局域网直连，不经过云端。", version))
                 }
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(MoonTheme.canvas)
-            .navigationTitle("存储位置与常见问题")
+            .navigationTitle(moonT("存储位置与常见问题"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
+                    Button(moonT("完成")) { dismiss() }
                 }
             }
         }
@@ -651,6 +661,7 @@ struct StorageHelpSheet: View {
 
 struct ConnectionSheet: View {
     @EnvironmentObject private var model: AppModel
+    @ObservedObject private var prefs = MoonPreferences.shared
     @Environment(\.dismiss) private var dismiss
     @State private var copied = false
 
@@ -658,11 +669,11 @@ struct ConnectionSheet: View {
         NavigationStack {
             List {
                 Section {
-                    LabeledContent("本机名称", value: model.deviceName)
-                    LabeledContent("监听端口",
-                                   value: model.listenPort > 0 ? String(model.listenPort) : "启动中")
-                    LabeledContent("局域网地址", value: addressText)
-                    LabeledContent("广播状态", value: advertiseText)
+                    LabeledContent(moonT("本机名称"), value: model.deviceName)
+                    LabeledContent(moonT("监听端口"),
+                                   value: model.listenPort > 0 ? String(model.listenPort) : moonT("启动中"))
+                    LabeledContent(moonT("局域网地址"), value: addressText)
+                    LabeledContent(moonT("广播状态"), value: advertiseText)
                 }
 
                 Section {
@@ -675,7 +686,7 @@ struct ConnectionSheet: View {
                     Button {
                         copyAddress()
                     } label: {
-                        Label(copied ? "已复制" : "复制地址", systemImage: "doc.on.doc")
+                        Label(copied ? moonT("已复制") : moonT("复制地址"), systemImage: "doc.on.doc")
                     }
                     .disabled(model.localAddresses.isEmpty)
                 }
@@ -683,11 +694,11 @@ struct ConnectionSheet: View {
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(MoonTheme.canvas)
-            .navigationTitle("连接详情")
+            .navigationTitle(moonT("连接详情"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
+                    Button(moonT("完成")) { dismiss() }
                 }
             }
         }
@@ -697,25 +708,25 @@ struct ConnectionSheet: View {
 
     private var addressText: String {
         let addresses = model.localAddresses
-        return addresses.isEmpty ? "未连接 Wi-Fi" : addresses.joined(separator: ", ")
+        return addresses.isEmpty ? moonT("未连接 Wi-Fi") : addresses.joined(separator: ", ")
     }
 
     private var advertiseText: String {
-        if model.listenPort <= 0 { return "接收服务启动中" }
-        return model.isAdvertiseLive ? "已上线" : "未确认"
+        if model.listenPort <= 0 { return moonT("接收服务启动中") }
+        return model.isAdvertiseLive ? moonT("已上线") : moonT("未确认")
     }
 
     private var explanation: String {
         if model.listenPort <= 0 {
-            return "接收服务还在启动，请稍等。"
+            return moonT("接收服务还在启动，请稍等。")
         }
         if model.localAddresses.isEmpty {
-            return "未取得局域网地址，请确认已连接 Wi-Fi。"
+            return moonT("未取得局域网地址，请确认已连接 Wi-Fi。")
         }
         if !model.isAdvertiseLive {
-            return "广播未确认。请在「设置 → 隐私与安全性 → 本地网络」允许 MoonDrop，或改用扫描 / 手动填写 IP。"
+            return moonT("广播未确认。请在「设置 → 隐私与安全性 → 本地网络」允许 MoonDrop，或改用扫描 / 手动填写 IP。")
         }
-        return "其他设备可以在同一 Wi-Fi 下直接看到本机。"
+        return moonT("其他设备可以在同一 Wi-Fi 下直接看到本机。")
     }
 
     private func copyAddress() {
