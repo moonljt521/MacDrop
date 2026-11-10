@@ -224,10 +224,19 @@ struct ContentView: View {
         case 3: return moonT("每一次传递，都有迹可循")
         case 4: return moonT("共享的文件尚未发送，请选择接收设备")
         default:
+            if model.scanning { return scanSubtitle }
+            if !model.scanSummary.isEmpty { return model.scanSummary }
             return model.peers.isEmpty
                 ? moonT("打开另一台设备上的 MoonDrop")
                 : moonTP("%d 台设备在附近，轻点开始传递", model.peers.count)
         }
+    }
+
+    /// 扫描中的副标题：说清楚正在做什么、这次扫描找到了几台
+    private var scanSubtitle: String {
+        model.scanFound > 0
+            ? moonTP("正在扫描 · 本次找到 %d 台设备", model.scanFound)
+            : moonT("正在扫描 · 正在逐个探测局域网地址")
     }
 
     private var centralField: some View {
@@ -248,7 +257,8 @@ struct ContentView: View {
             } else if model.pendingCount > 0 {
                 pendingField
             } else {
-                MoonPeerField(peers: model.peers) { peer in
+                MoonPeerField(peers: model.peers,
+                              scanning: model.scanning) { peer in
                     UISelectionFeedbackGenerator().selectionChanged()
                     sheet = .sendOptions(peer)
                 }
@@ -286,14 +296,22 @@ struct ContentView: View {
         return layout {
             Button { model.scanSubnet() } label: {
                 HStack(spacing: 7) {
-                    if model.scanning { ProgressView().controlSize(.small) }
-                    else { Image(systemName: "arrow.clockwise") }
+                    if model.scanning {
+                        MoonScanGlyph()
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
                     Text(model.scanning ? moonT("正在扫描") : moonT("重新扫描"))
                 }
                 .frame(minHeight: 44)
             }
             .disabled(model.scanning)
-            .accessibilityLabel(moonT("扫描局域网设备"))
+            .accessibilityLabel(model.scanning
+                                ? moonT("正在扫描局域网设备")
+                                : moonT("扫描局域网设备"))
+            .accessibilityValue(model.scanning
+                                ? moonTP("已发现 %d 台设备", model.scanFound)
+                                : "")
             Button {
                 model.manualError = nil
                 sheet = .manualPeer

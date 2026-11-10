@@ -6,16 +6,24 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorFilter
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.DashPathEffect
+import android.graphics.PixelFormat
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
+import android.graphics.RadialGradient
 import android.graphics.RectF
+import android.graphics.Shader
+import android.graphics.SweepGradient
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.text.TextUtils
+import android.os.SystemClock
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
@@ -24,6 +32,7 @@ import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -648,11 +657,19 @@ class MoonCrescentView(context: Context, private val ui: MoonUi) : View(context)
     override fun onDraw(canvas: Canvas) { canvas.drawPath(shape, paint) }
 }
 
-data class MoonNearbyDevice(val name: String, val connection: String, val onClick: () -> Unit)
+data class MoonNearbyDevice(
+    /** 稳定标识：同一个设备在刷新之间要认得出，才能保留它、只让新设备做浮现动画 */
+    val id: String,
+    val name: String,
+    val connection: String,
+    val onClick: () -> Unit
+)
 
 private class MoonPeerButton(private val ui: MoonUi, device: MoonNearbyDevice) : LinearLayout(ui.context) {
     private var listMode: Boolean? = null
     private var density = -1
+    val id: String = device.id
+    private var device = device
     private val icon = moonIcon(ui, R.drawable.ic_moon_device, 34, ui.colors.textPrimary)
     private val glyph = FrameLayout(context).apply {
         background = moonRounded(ui, ui.colors.surface, 24)
@@ -687,6 +704,15 @@ private class MoonPeerButton(private val ui: MoonUi, device: MoonNearbyDevice) :
     fun needsListMode(width: Int): Boolean =
         name.paint.measureText(name.text.toString()) > width * 2f ||
             name.text.contains('\n') || connection.paint.measureText(connection.text.toString()) > width
+
+    /** 设备信息变了（改名、连接方式变化）就更新文字，保留这个 View */
+    fun update(next: MoonNearbyDevice) {
+        device = next
+        name.text = next.name
+        connection.text = next.connection
+        contentDescription = MoonStrings.f("发送到 %s，%s", next.name, next.connection)
+        setOnClickListener { next.onClick() }
+    }
 
     fun setListMode(list: Boolean) {
         if (listMode == list) return
@@ -742,6 +768,25 @@ private class MoonOrbitLayout(private val ui: MoonUi) : ViewGroup(ui.context) {
     private var listMode = false
     private var localTop = 0
     private var rowLowerTop = 0
+    private var beamActive = false
+    private val beamPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val edgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = ui.dpf(1.5f)
+        color = ui.alpha(ui.colors.primary, 0.45f)
+    }
+    private val fadePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
+    }
+    private val beamTicker = ValueAnimator.ofFloat(0f, 1f).apply {
+        duration = 16L
+        repeatCount = ValueAnimator.INFINITE
+        addUpdateListener { invalidate() }
+    }
+    private val conePath = Path()
+    private val coneRect = RectF()
+    /** 每台设备上一次摆放的位置，用来在换位时滑过去 */
+    private val lastPositions = HashMap<String, Pair<Int, Int>>()
     private val local = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER_HORIZONTAL
@@ -760,17 +805,19 @@ private class MoonOrbitLayout(private val ui: MoonUi) : ViewGroup(ui.context) {
             topMargin = ui.dp(12)
         })
     }
+    private val emptyTitle = moonText(ui, MoonStrings.t("等待设备出现"), 17f, ui.colors.textPrimary, ui.medium).apply {
+        gravity = Gravity.CENTER
+    }
+    private val emptyHint = moonText(ui, MoonStrings.t("在另一台设备上打开 MoonDrop\n同一 Wi-Fi 下自动发现"), 13f, ui.colors.textSecondary).apply {
+        gravity = Gravity.CENTER
+        setLineSpacing(0f, 1.35f)
+        setPadding(0, ui.dp(8), 0, 0)
+    }
     private val empty = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER_HORIZONTAL
-        addView(moonText(ui, MoonStrings.t("等待设备出现"), 17f, ui.colors.textPrimary, ui.medium).apply {
-            gravity = Gravity.CENTER
-        })
-        addView(moonText(ui, MoonStrings.t("在另一台设备上打开 MoonDrop\n同一 Wi-Fi 下自动发现"), 13f, ui.colors.textSecondary).apply {
-            gravity = Gravity.CENTER
-            setLineSpacing(0f, 1.35f)
-            setPadding(0, ui.dp(8), 0, 0)
-        })
+        addView(emptyTitle)
+        addView(emptyHint)
     }
 
     init {
@@ -779,16 +826,57 @@ private class MoonOrbitLayout(private val ui: MoonUi) : ViewGroup(ui.context) {
         addView(local)
     }
 
+    /**
+     * 刷新设备列表：已有的设备保留原来的 View，只有新发现的才弹入，
+     * 其余设备让位时滑过去而不是突然跳位。
+     */
     fun setDevices(devices: List<MoonNearbyDevice>) {
-        peers.forEach { removeView(it) }
-        peers.clear()
+        val existing = peers.associateBy { it.id }
+        val handled = HashSet<String>()
+        val next = ArrayList<MoonPeerButton>(devices.size)
         devices.forEach { device ->
-            val button = MoonPeerButton(ui, device)
-            peers.add(button)
-            addView(button)
+            val button = existing[device.id]
+            if (button == null) {
+                val created = MoonPeerButton(ui, device)
+                next.add(created)
+                addView(created)
+                // 扫描中新发现的设备弹入并落位
+                if (beamActive) animateArrival(created)
+            } else {
+                handled.add(device.id)
+                button.update(device)
+                next.add(button)
+            }
         }
+        existing.values.forEach { if (it.id !in handled) removeView(it) }
+        peers.clear()
+        peers.addAll(next)
         empty.visibility = if (peers.isEmpty()) VISIBLE else GONE
         requestLayout()
+        invalidate()
+    }
+
+    /** 新设备带弹性浮现 */
+    private fun animateArrival(button: MoonPeerButton) {
+        button.scaleX = 0.72f
+        button.scaleY = 0.72f
+        button.alpha = 0f
+        button.animate()
+            .scaleX(1f).scaleY(1f).alpha(1f)
+            .setDuration(420)
+            .setInterpolator(OvershootInterpolator(1.1f))
+            .start()
+    }
+
+    /** 扫描中：舞台亮起雷达光束，空状态换成扫描文案 */
+    fun setScanning(active: Boolean) {
+        if (beamActive == active) return
+        beamActive = active
+        emptyTitle.text = MoonStrings.t(if (active) "正在扫描局域网" else "等待设备出现")
+        emptyHint.text = MoonStrings.t(
+            if (active) "正在逐个探测同网段的设备" else "在另一台设备上打开 MoonDrop\n同一 Wi-Fi 下自动发现"
+        )
+        if (active) beamTicker.start() else beamTicker.cancel()
         invalidate()
     }
 
@@ -861,8 +949,23 @@ private class MoonOrbitLayout(private val ui: MoonUi) : ViewGroup(ui.context) {
                 val (fraction, row) = slots[index]
                 val x = (width * fraction).toInt() - peer.measuredWidth / 2
                 val y = if (row == 0) upperTop else lowerTop
+                // 位置变了就滑过去，别让设备突然跳位
+                val previous = lastPositions[peer.id]
+                if (previous == null) {
+                    peer.translationX = 0f
+                    peer.translationY = 0f
+                } else if (previous.first != x || previous.second != y) {
+                    peer.translationX = (previous.first - x).toFloat()
+                    peer.translationY = (previous.second - y).toFloat()
+                    peer.animate().translationX(0f).translationY(0f)
+                        .setDuration(420)
+                        .setInterpolator(DecelerateInterpolator())
+                        .start()
+                }
+                lastPositions[peer.id] = x to y
                 peer.layout(x, y, x + peer.measuredWidth, y + peer.measuredHeight)
             }
+            lastPositions.keys.retainAll(peers.map { it.id }.toSet())
         }
     }
 
@@ -877,6 +980,92 @@ private class MoonOrbitLayout(private val ui: MoonUi) : ViewGroup(ui.context) {
             canvas.drawArc(arc, 180f, 180f, false, line)
         }
         line.pathEffect = null
+        if (beamActive) drawBeam(canvas, cx, cy, maxOf(width, height).toFloat())
+    }
+
+    /**
+     * 雷达光束：从「此设备」发出的一束光，绕着本机匀速旋转。
+     *
+     * 这是「正在搜寻」的状态信号，不声称任何百分比：扫多久它就转多久，
+     * 扫描结束即消失。真实的结果由副标题的台数和逐个冒出来的设备来说。
+     */
+    private fun drawBeam(canvas: Canvas, cx: Float, cy: Float, reach: Float) {
+        val spread = 46f
+        val angle = MoonRadar.angleAt(SystemClock.uptimeMillis())
+        val start = angle - spread / 2f
+        val end = angle + spread / 2f
+
+        val layer = canvas.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), null)
+        canvas.save()
+        // 只照本机上方：转到身后的部分被「此设备」挡住
+        canvas.clipRect(0f, 0f, width.toFloat(), cy)
+
+        // 角向：尾部透明 → 前沿最亮，像一束真的光扫过去
+        beamPaint.shader = SweepGradient(
+            cx, cy,
+            intArrayOf(
+                Color.TRANSPARENT,
+                ui.alpha(ui.colors.primary, 0.17f),
+                Color.TRANSPARENT
+            ),
+            floatArrayOf(0f, spread / 360f, (spread + 6f) / 360f)
+        )
+        coneRect.set(cx - reach, cy - reach, cx + reach, cy + reach)
+        conePath.reset()
+        conePath.moveTo(cx, cy)
+        conePath.arcTo(coneRect, 0f, spread, true)
+        conePath.close()
+        canvas.save()
+        canvas.rotate(start, cx, cy)
+        canvas.drawPath(conePath, beamPaint)
+        canvas.restore()
+
+        // 前沿亮线
+        var head = end % 360f
+        if (head < 0) head += 360f
+        if (head >= 180f) {
+            val rad = Math.toRadians(head.toDouble())
+            canvas.drawLine(
+                cx, cy,
+                cx + reach * Math.cos(rad).toFloat(),
+                cy + reach * Math.sin(rad).toFloat(),
+                edgePaint
+            )
+        }
+        canvas.restore()
+
+        // 压暗转到本机身后的部分，避免光扫到场地外的死角
+        canvas.save()
+        canvas.rotate(180f, cx, cy)
+        fadePaint.shader = SweepGradient(
+            cx, cy,
+            intArrayOf(
+                Color.BLACK,
+                Color.BLACK,
+                Color.argb(10, 0, 0, 0),
+                Color.argb(10, 0, 0, 0),
+                Color.BLACK
+            ),
+            floatArrayOf(0f, 0.44f, 0.56f, 0.9f, 1f)
+        )
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), fadePaint)
+        canvas.restore()
+
+        // 径向：离本机越远越淡，光束不会在场边切出一条硬边
+        fadePaint.shader = RadialGradient(
+            cx, cy, reach,
+            intArrayOf(
+                Color.BLACK,
+                Color.argb(217, 0, 0, 0),
+                Color.argb(71, 0, 0, 0),
+                Color.TRANSPARENT
+            ),
+            floatArrayOf(0f, 0.3f, 0.6f, 0.88f),
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), fadePaint)
+
+        canvas.restoreToCount(layer)
     }
 }
 
@@ -891,6 +1080,95 @@ class MoonNearfieldView(context: Context, private val ui: MoonUi) : LinearLayout
     fun setDevices(devices: List<MoonNearbyDevice>) {
         orbit.setDevices(devices)
     }
+
+    fun setScanning(active: Boolean) {
+        orbit.setScanning(active)
+    }
+}
+
+// MARK: - 雷达（按钮表盘与舞台光束共用节拍）
+
+/**
+ * 雷达节拍：舞台光束与按钮表盘共用同一个转速，看起来是同一个东西的两个尺寸。
+ */
+object MoonRadar {
+    /** 转一圈要多久 */
+    const val PERIOD_MS = 1800L
+
+    /** 按绝对时间取角度：任意时刻接着转，不会因为重新扫描而跳相位 */
+    fun angleAt(nowMs: Long): Float =
+        ((nowMs % PERIOD_MS).toFloat() / PERIOD_MS) * 360f
+}
+
+/**
+ * 按钮上的雷达表盘。
+ *
+ * 和舞台光束同一个转速、同一个方向：它表示「正在搜寻」，不声称任何百分比。
+ * 扫多久它就转多久，扫描结束就换回普通图标。
+ */
+class MoonRadarDrawable(private val ui: MoonUi) : Drawable() {
+
+    private val dial = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = ui.dpf(0.5f)
+        color = ui.colors.divider
+    }
+    private val beam = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val needle = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val size = ui.dp(20)
+    private var running = false
+    private val ticker = ValueAnimator.ofFloat(0f, 1f).apply {
+        duration = 16L
+        repeatCount = ValueAnimator.INFINITE
+        addUpdateListener { invalidateSelf() }
+    }
+
+    override fun getIntrinsicWidth(): Int = size
+
+    override fun getIntrinsicHeight(): Int = size
+
+    fun start() {
+        if (running) return
+        running = true
+        ticker.start()
+        invalidateSelf()
+    }
+
+    fun stop() {
+        if (!running) return
+        running = false
+        ticker.cancel()
+        invalidateSelf()
+    }
+
+    override fun draw(canvas: Canvas) {
+        val b = bounds
+        val cx = b.exactCenterX()
+        val cy = b.exactCenterY()
+        val r = minOf(b.width(), b.height()) * 0.4f
+        canvas.drawCircle(cx, cy, r, dial)
+        if (!running) return
+        canvas.save()
+        canvas.rotate(MoonRadar.angleAt(SystemClock.uptimeMillis()), cx, cy)
+        // 光束：正上方向左铺开的一瓣
+        beam.color = ui.alpha(ui.colors.primary, 0.18f)
+        val wedge = Path()
+        wedge.moveTo(cx, cy)
+        wedge.arcTo(RectF(cx - r, cy - r, cx + r, cy + r), -90f, -58f, true)
+        wedge.close()
+        canvas.drawPath(wedge, beam)
+        // 指针：从圆心指向正上方
+        needle.color = ui.colors.primary
+        canvas.drawRect(cx - ui.dpf(0.75f), cy - r, cx + ui.dpf(0.75f), cy, needle)
+        canvas.restore()
+    }
+
+    override fun setAlpha(alpha: Int) = Unit
+
+    override fun setColorFilter(colorFilter: ColorFilter?) = Unit
+
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 }
 
 // MARK: - 实际进度环（不使用计时器或模拟进度）

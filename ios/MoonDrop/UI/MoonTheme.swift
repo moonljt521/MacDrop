@@ -90,6 +90,8 @@ struct MoonEmptyState: View {
 
 struct MoonPeerField: View {
     let peers: [Peer]
+    /// 局域网扫描进行中：舞台亮起雷达光束
+    var scanning: Bool = false
     let onSelect: (Peer) -> Void
 
     @ObservedObject private var prefs = MoonPreferences.shared
@@ -137,7 +139,7 @@ struct MoonPeerField: View {
             let height = geometry.size.height
             let peerWidth = peerWidth(for: width)
             ZStack(alignment: .topLeading) {
-                MoonFieldDecoration()
+                MoonFieldDecoration(scanning: scanning)
                 ForEach(Array(peers.enumerated()), id: \.element.endpoint) { index, peer in
                     let slot = slot(index, width: width, height: height)
                     MoonFieldPeerButton(peer: peer, isList: false,
@@ -145,14 +147,30 @@ struct MoonPeerField: View {
                                         onSelect: onSelect)
                         .frame(width: peerWidth)
                         .offset(x: slot.x - peerWidth / 2, y: slot.y)
+                        .transition(arrivalTransition)
                 }
             }
             .frame(width: width, height: height, alignment: .topLeading)
+            // 扫描中新发现的设备弹入并落位，其余设备跟着让位
+            .animation(arrivalAnimation, value: peers)
         }
         .frame(height: fieldHeight)
         .frame(minHeight: fieldHeight)
         .frame(maxWidth: max(430, minimumFieldWidth))
         .frame(maxWidth: .infinity)
+    }
+
+    /// 扫描中才给设备加浮现动效，平时设备增减保持安静
+    private var arrivalTransition: AnyTransition {
+        (scanning && !reduceMotion)
+            ? .scale(scale: 0.72).combined(with: .opacity)
+            : .identity
+    }
+
+    private var arrivalAnimation: Animation? {
+        (scanning && !reduceMotion)
+            ? .spring(response: 0.45, dampingFraction: 0.8)
+            : nil
     }
 
     private func peerWidth(for width: CGFloat) -> CGFloat {
@@ -202,10 +220,10 @@ struct MoonPeerField: View {
     private var emptyField: some View {
         VStack(spacing: 24) {
             VStack(spacing: 8) {
-                Text(moonT("等待设备出现"))
+                Text(scanning ? moonT("正在扫描局域网") : moonT("等待设备出现"))
                     .font(.title3.weight(.medium))
                     .foregroundStyle(MoonTheme.textPrimary)
-                Text(moonT("在另一台设备上打开 MoonDrop"))
+                Text(scanning ? moonT("正在逐个探测同网段的设备") : moonT("在另一台设备上打开 MoonDrop"))
                     .font(MoonType.meta)
                     .foregroundStyle(MoonTheme.textSecondary)
             }
@@ -213,7 +231,7 @@ struct MoonPeerField: View {
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 12)
 
-            MoonFieldDecoration()
+            MoonFieldDecoration(scanning: scanning)
                 .frame(height: 214)
         }
         .padding(.top, 24)
@@ -290,8 +308,10 @@ private struct MoonFieldPeerButton: View {
     }
 
     private var connectionType: String {
-        if peer.isManual { return moonT("手动连接") }
-        return peer.isPeerToPeer ? moonT("点对点直连") : moonT("局域网直连")
+        if peer.isPeerToPeer { return moonT("点对点直连") }
+        // 扫描兜底发现的设备也是局域网直连，不该说成「手动连接」
+        if peer.isManual && !peer.isScanned { return moonT("手动连接") }
+        return moonT("局域网直连")
     }
 }
 
@@ -325,17 +345,21 @@ private struct MoonFieldDecoration: View {
     @Environment(\.displayScale) private var displayScale
     @ScaledMetric(relativeTo: .footnote) private var localLabelHeight: CGFloat = 16
 
+    /// 扫描中：从「此设备」打出一道雷达光束
+    let scanning: Bool
+
     var body: some View {
         GeometryReader { geometry in
-            let center = CGPoint(x: geometry.size.width / 2,
+            // 光束原点就是「此设备」的圆心：此处即雷达，设备场即目标区
+            let origin = CGPoint(x: geometry.size.width / 2,
                                  y: geometry.size.height - localLabelHeight - 57)
-            let radius = max(0, min(geometry.size.width / 2 - 8, center.y - 8))
+            let radius = max(0, min(geometry.size.width / 2 - 8, origin.y - 8))
             ZStack {
                 // These stationary arcs are decoration, not measured distances.
                 Path { path in
                     for fraction in [CGFloat(1), 0.82] {
-                        path.move(to: CGPoint(x: center.x - radius * fraction, y: center.y))
-                        path.addArc(center: center, radius: radius * fraction,
+                        path.move(to: CGPoint(x: origin.x - radius * fraction, y: origin.y))
+                        path.addArc(center: origin, radius: radius * fraction,
                                     startAngle: .degrees(180), endAngle: .degrees(360), clockwise: false)
                     }
                 }
@@ -343,11 +367,17 @@ private struct MoonFieldDecoration: View {
                 .accessibilityHidden(true)
 
                 Path { path in
-                    path.addArc(center: center, radius: radius * 0.58,
+                    path.addArc(center: origin, radius: radius * 0.58,
                                 startAngle: .degrees(180), endAngle: .degrees(360), clockwise: false)
                 }
                 .stroke(MoonTheme.divider, style: StrokeStyle(lineWidth: 1 / displayScale, dash: [2, 7]))
                 .accessibilityHidden(true)
+
+                if scanning {
+                    MoonRadarBeam(origin: origin,
+                                  reach: max(geometry.size.width, geometry.size.height))
+                        .clipped()
+                }
 
                 MoonLocalDevice()
                     .padding(.bottom, 4)
@@ -355,6 +385,119 @@ private struct MoonFieldDecoration: View {
             }
         }
         .allowsHitTesting(false)
+    }
+}
+
+/// 雷达节拍：舞台光束与按钮表盘共用同一个转速，看起来是同一个东西的两个尺寸。
+enum MoonRadar {
+    /// 转一圈要多久
+    static let period: TimeInterval = 1.8
+    /// 按绝对时间取角度：任意时刻接着转，不会因为重新扫描而跳相位
+    static func angle(at date: Date) -> Double {
+        let t = date.timeIntervalSinceReferenceDate
+        return t.truncatingRemainder(dividingBy: period) / period * 360
+    }
+}
+
+/// 雷达光束：从「此设备」发出的一束光，绕着本机匀速旋转。
+///
+/// 这是「正在搜寻」的状态信号，不声称任何百分比：扫多久它就转多久，
+/// 扫描结束即消失。真实的结果由副标题的台数和逐个冒出来的设备来说。
+private struct MoonRadarBeam: View {
+    /// 光束原点：「此设备」的圆心
+    let origin: CGPoint
+    /// 光束能照到的最远距离
+    let reach: CGFloat
+    /// 光束张角
+    private let spread: Double = 46
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Group {
+            if reduceMotion {
+                beam(angle: 250)
+            } else {
+                TimelineView(.animation) { timeline in
+                    beam(angle: MoonRadar.angle(at: timeline.date))
+                }
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func beam(angle: Double) -> some View {
+        Canvas { ctx, _ in
+            // 光束只照本机上方：把角度段夹到 180°–360°，转到身后的部分被「此设备」挡住
+            let start = angle - spread / 2
+            let end = angle + spread / 2
+            var segments: [(Double, Double)] = []
+            for shift in [0.0, 360.0, -360.0] {
+                let lo = max(start + shift, 180)
+                let hi = min(end + shift, 360)
+                if hi > lo { segments.append((lo, hi)) }
+            }
+
+            let canvas = CGRect(x: origin.x - reach, y: origin.y - reach,
+                                width: reach * 2, height: reach * 2)
+
+            ctx.drawLayer { layer in
+                for (lo, hi) in segments {
+                    var cone = Path()
+                    cone.move(to: origin)
+                    cone.addArc(center: origin, radius: reach,
+                                startAngle: .degrees(lo), endAngle: .degrees(hi), clockwise: false)
+                    cone.closeSubpath()
+
+                    // 角向：尾部透明 → 前沿最亮，像一束真的光扫过去
+                    layer.fill(cone, with: .conicGradient(
+                        Gradient(stops: [
+                            .init(color: .clear, location: 0),
+                            .init(color: MoonTheme.primary.opacity(0.17), location: spread / 360),
+                            .init(color: .clear, location: (spread + 6) / 360)
+                        ]),
+                        center: origin,
+                        angle: .degrees(start)))
+                }
+
+                // 前沿亮线
+                var head = end.truncatingRemainder(dividingBy: 360)
+                if head < 0 { head += 360 }
+                if head >= 180 {
+                    var edge = Path()
+                    edge.move(to: origin)
+                    edge.addLine(to: CGPoint(x: origin.x + reach * cos(head * .pi / 180),
+                                             y: origin.y + reach * sin(head * .pi / 180)))
+                    layer.stroke(edge, with: .color(MoonTheme.primary.opacity(0.45)), lineWidth: 1.5)
+                }
+
+                // 压暗转到本机身后的部分，避免光扫到场地外的死角
+                layer.blendMode = .destinationIn
+                layer.fill(Path(canvas), with: .conicGradient(
+                    Gradient(stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .black, location: 0.44),
+                        .init(color: .black.opacity(0.04), location: 0.56),
+                        .init(color: .black.opacity(0.04), location: 0.9),
+                        .init(color: .black, location: 1)
+                    ]),
+                    center: origin,
+                    angle: .degrees(180)))
+
+                // 径向：离本机越远越淡，光束不会在场边切出一条硬边
+                layer.blendMode = .destinationIn
+                layer.fill(Path(canvas), with: .radialGradient(
+                    Gradient(stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .black.opacity(0.85), location: 0.3),
+                        .init(color: .black.opacity(0.28), location: 0.6),
+                        .init(color: .clear, location: 0.88)
+                    ]),
+                    center: origin,
+                    startRadius: 0,
+                    endRadius: reach))
+            }
+        }
     }
 }
 
@@ -903,6 +1046,72 @@ struct MoonStatusDot: View {
             .frame(width: 6, height: 6)
             .frame(width: 16, height: 16)
             .accessibilityHidden(true)
+    }
+}
+
+/// 重新扫描按钮上的雷达表盘。
+///
+/// 和舞台光束同一个转速、同一个方向：它表示「正在搜寻」，不声称任何百分比。
+/// 扫多久它就转多久，扫描结束就换回普通图标。
+struct MoonScanGlyph: View {
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let diameter: CGFloat = 15
+
+    var body: some View {
+        Group {
+            if reduceMotion {
+                dial(angle: 250)
+            } else {
+                TimelineView(.animation) { timeline in
+                    dial(angle: MoonRadar.angle(at: timeline.date))
+                }
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func dial(angle: Double) -> some View {
+        ZStack {
+            Circle()
+                .strokeBorder(MoonTheme.divider, lineWidth: 1 / displayScale)
+                .frame(width: diameter, height: diameter)
+
+            sweep
+                .frame(width: diameter, height: diameter)
+                .rotationEffect(.degrees(angle))
+        }
+        .frame(width: diameter + 2, height: diameter + 2)
+    }
+
+    private var sweep: some View {
+        ZStack {
+            // 光束：表盘正上方向左铺开的一瓣
+            MoonScanBeam()
+                .fill(MoonTheme.primary.opacity(0.18))
+            // 指针：从圆心指向正上方
+            Rectangle()
+                .fill(MoonTheme.primary)
+                .frame(width: 1.5, height: diameter / 2)
+                .offset(y: -diameter / 4)
+        }
+    }
+}
+
+/// 雷达光束：正上方（-90°）逆时针铺开的一瓣
+private struct MoonScanBeam: Shape {
+    let angle: Double = 58
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) / 2
+        path.move(to: center)
+        path.addArc(center: center, radius: radius,
+                    startAngle: .degrees(-90 - angle), endAngle: .degrees(-90), clockwise: false)
+        path.closeSubpath()
+        return path
     }
 }
 

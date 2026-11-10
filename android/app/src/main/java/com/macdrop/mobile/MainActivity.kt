@@ -17,6 +17,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.provider.Settings
@@ -52,6 +53,7 @@ import com.macdrop.mobile.ui.MoonNearfieldView
 import com.macdrop.mobile.ui.MoonButton
 import com.macdrop.mobile.ui.MoonPrefs
 import com.macdrop.mobile.ui.MoonProgressView
+import com.macdrop.mobile.ui.MoonRadarDrawable
 import com.macdrop.mobile.ui.MoonSegmented
 import com.macdrop.mobile.ui.MoonSheet
 import com.macdrop.mobile.ui.MoonStatusDot
@@ -146,6 +148,12 @@ class MainActivity : Activity() {
     private var discoveryStarted = false
     private var screenVisible = false
     private var scanning = false
+    /** 本次扫描已经命中的设备数 */
+    private var scanFound = 0
+    /** 扫描开始时刻：用来保证雷达至少被看见一小会儿 */
+    private var scanStartedAt = 0L
+    private lateinit var rescanButton: MoonButton
+    private var radarDrawable: MoonRadarDrawable? = null
 
     private var sending = false
     private var sendingProgress = 0.0
@@ -361,11 +369,14 @@ class MainActivity : Activity() {
             orientation = if (stackActions) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        helpers.addView(MoonButton(this, ui, MoonButton.Style.GHOST, MoonStrings.t("重新扫描"), R.drawable.ic_moon_scan).apply {
+        rescanButton = MoonButton(
+            this, ui, MoonButton.Style.GHOST, MoonStrings.t("重新扫描"), R.drawable.ic_moon_scan
+        ).apply {
             textSize = 13f
             setTextColor(c.textSecondary)
             setOnClickListener { scanSubnet() }
-        })
+        }
+        helpers.addView(rescanButton)
         helpers.addView(MoonButton(this, ui, MoonButton.Style.GHOST, MoonStrings.t("手动连接"), R.drawable.ic_moon_plus).apply {
             textSize = 13f
             setTextColor(c.textSecondary)
@@ -771,24 +782,82 @@ class MainActivity : Activity() {
         toast(MoonStrings.f("已改名为「%s」", saved))
     }
 
+    /**
+     * Bonjour 之外的兜底：组播被屏蔽的网络里靠这个把设备找回来。
+     *
+     * 扫描是流式的：探测到一台就立刻加进设备列表，界面因此能边扫边显示，
+     * 而不是盯着一个空转的圈等最长 12 秒。
+     */
     private fun scanSubnet() {
         if (scanning) return
         scanning = true
+        scanFound = 0
+        scanStartedAt = SystemClock.uptimeMillis()
+        updateScanButton()
+        nearfield.setScanning(true)
         updatePeerCaption()
-        SubnetScan.run { found ->
-            scanning = false
-            if (isFinishing || isDestroyed) return@run
-            for (hit in found) {
-                val peer = Peer(name = hit.name, host = hit.host, port = hit.port, manual = true)
-                scannedPeers.removeAll { it.endpoint == peer.endpoint }
-                scannedPeers.add(peer)
+        SubnetScan.run(
+            onProgress = { progress ->
+                if (isFinishing || isDestroyed) return@run
+                scanFound = progress.found.size
+                // 命中一台就立刻放进列表，设备可以边扫边冒出来
+                addScannedPeers(progress.found)
+                refreshPeers()
+                updatePeerCaption()
+            },
+            completion = { final ->
+                if (isFinishing || isDestroyed) return@run
+                addScannedPeers(final.found)
+                refreshPeers()
+                // 快网络下扫描转瞬即逝，至少让雷达转起来一小会儿，否则等于没反馈
+                val elapsed = SystemClock.uptimeMillis() - scanStartedAt
+                val delay = maxOf(0L, MINIMUM_SCAN_MS - elapsed)
+                handler.postDelayed({
+                    scanning = false
+                    updateScanButton()
+                    nearfield.setScanning(false)
+                    updatePeerCaption()
+                    toast(if (final.found.isEmpty()) {
+                        MoonStrings.t("没有扫到设备，网络可能开了客户端隔离")
+                    } else {
+                        MoonStrings.f("扫描到 %d 台设备", final.found.size)
+                    })
+                }, delay)
             }
-            refreshPeers()
-            toast(if (found.isEmpty()) {
-                MoonStrings.t("没有扫到设备，网络可能开了客户端隔离")
-            } else {
-                MoonStrings.f("扫描到 %d 台设备", found.size)
-            })
+        )
+    }
+
+    /** 扫描命中的设备放进列表；同一台只留一条 */
+    private fun addScannedPeers(hits: List<SubnetScan.Found>) {
+        for (hit in hits) {
+            val peer = Peer(name = hit.name, host = hit.host, port = hit.port, manual = true)
+            scannedPeers.removeAll { it.endpoint == peer.endpoint }
+            scannedPeers.add(peer)
+        }
+    }
+
+    /** 扫描中把按钮换成雷达表盘，结束后换回普通图标 */
+    private fun updateScanButton() {
+        if (!::rescanButton.isInitialized) return
+        if (scanning) {
+            val radar = radarDrawable ?: MoonRadarDrawable(ui).also { radarDrawable = it }
+            radar.setBounds(0, 0, ui.dp(20), ui.dp(20))
+            rescanButton.text = MoonStrings.t("正在扫描")
+            rescanButton.setCompoundDrawables(radar, null, null, null)
+            rescanButton.isEnabled = false
+            // 禁用态默认会把整块压到 40%，雷达会看不清；这里保持满亮
+            rescanButton.alpha = 1f
+            radar.start()
+        } else {
+            rescanButton.text = MoonStrings.t("重新扫描")
+            rescanButton.isEnabled = true
+            // setEnabled(true) 会重跑 applyStyle，把文字色改回 primaryStrong；这里改回中性色
+            rescanButton.setTextColor(ui.colors.textSecondary)
+            val drawable = resources.getDrawable(R.drawable.ic_moon_scan, theme).mutate()
+            drawable.setTint(ui.colors.primaryStrong)
+            drawable.setBounds(0, 0, ui.dp(20), ui.dp(20))
+            rescanButton.setCompoundDrawables(drawable, null, null, null)
+            radarDrawable?.stop()
         }
     }
 
@@ -865,7 +934,7 @@ class MainActivity : Activity() {
         if (!::nearfield.isInitialized) return
         val peers = mergedPeers()
         nearfield.setDevices(peers.map { peer ->
-            MoonNearbyDevice(peer.name, peerConnection(peer)) { showSendOptions(peer) }
+            MoonNearbyDevice(peer.endpoint, peer.name, peerConnection(peer)) { showSendOptions(peer) }
         })
         updatePeerCaption()
         refreshSendState()
@@ -875,7 +944,12 @@ class MainActivity : Activity() {
         if (!::peersCount.isInitialized) return
         val count = mergedPeers().size
         peersCount.text = when {
-            scanning -> MoonStrings.f("%d 台设备 · 正在扫描…", count)
+            // 扫描中的副标题：说清楚正在做什么、这次扫描找到了几台
+            scanning -> if (scanFound > 0) {
+                MoonStrings.f("正在扫描 · 本次找到 %d 台设备", scanFound)
+            } else {
+                MoonStrings.t("正在扫描 · 正在逐个探测局域网地址")
+            }
             count == 0 -> MoonStrings.t("0 台设备 · 发现后即可发送")
             else -> MoonStrings.f("%d 台设备，轻点即可发送", count)
         }
@@ -2058,5 +2132,8 @@ class MainActivity : Activity() {
         private const val REQ_ALBUM = 1004
         private const val REQ_NOTIFICATIONS = 1003
         private const val APK_MIME = "application/vnd.android.package-archive"
+
+        /// 雷达动画的最短展示时长：快网络下扫描转瞬即逝，一闪而过等于没反馈
+        private const val MINIMUM_SCAN_MS = 1000L
     }
 }

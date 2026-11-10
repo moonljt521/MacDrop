@@ -1,5 +1,8 @@
 .DS_Store
 
+# AI 工具的私有草稿目录，不属于产品仓库
+.workbuddy-ai/
+
 # macOS app
 .build/
 dist/

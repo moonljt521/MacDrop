@@ -122,6 +122,14 @@ enum MoonStrings {
         "正在扫描": "Scanning",
         "重新扫描": "Scan Again",
         "扫描局域网设备": "Scan the local network for devices",
+        "正在扫描局域网设备": "Scanning the local network for devices",
+        "已发现 %d 台设备": "%d devices found",
+        "正在扫描 · 本次找到 %d 台设备": "Scanning · %d devices found",
+        "正在扫描 · 正在逐个探测局域网地址": "Scanning · Probing local network addresses",
+        "扫描完成 · 本次找到 %d 台设备": "Scan complete · %d devices found",
+        "扫描完成 · 没有发现新设备": "Scan complete · No new devices found",
+        "正在扫描局域网": "Scanning the Local Network",
+        "正在逐个探测同网段的设备": "Probing devices on this network",
         "手动连接": "Manual",
         "手动添加设备": "Add Device",
         "最近传输": "Recent",
@@ -256,7 +264,6 @@ enum MoonStrings {
         "已改名为「%@」": "Renamed to “%@”",
         "扫描完成：没有发现设备，网络可能开了客户端隔离":
             "Scan Complete: No Devices Found. The network may isolate clients.",
-        "扫描到 %d 台设备": "Found %d devices",
         "没有可用设备": "No Devices Available",
         "已取消": "Canceled",
         "没有可发送的文件": "No Files to Send",
@@ -291,6 +298,8 @@ enum MoonStrings {
         "已发送 %d 个文件到 %@": "Sent %d file to %@",
         "%d 个文件待发送": "%d file pending",
         "%d 台设备在附近，轻点开始传递": "%d device nearby. Tap to start.",
-        "扫描到 %d 台设备": "Found %d device"
+        "已发现 %d 台设备": "%d device found",
+        "正在扫描 · 本次找到 %d 台设备": "Scanning · %d device found",
+        "扫描完成 · 本次找到 %d 台设备": "Scan complete · %d device found"
     ]
 }

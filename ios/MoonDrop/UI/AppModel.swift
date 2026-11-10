@@ -12,6 +12,10 @@ final class AppModel: ObservableObject {
     private static let savedPhotosKey = "com.macdrop.mobile.savedPhotoPaths"
     private static let sentKey = "com.macdrop.mobile.sentRecords"
     private static let appGroupID = "group.com.macdrop.mobile"
+    /// 雷达动画的最短展示时长：快网络下扫描转瞬即逝，一闪而过等于没反馈
+    private static let minimumScanDuration: TimeInterval = 1
+    /// 扫描结论在副标题上停留的时间
+    private static let summaryDuration: TimeInterval = 5
 
     @Published var deviceName: String
     let deviceID: String
@@ -26,6 +30,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var listenPort: UInt16 = 0
     @Published var showingDevicePicker = false
     @Published private(set) var scanning = false
+    /// 本次扫描已经命中的设备数
+    @Published private(set) var scanFound: Int = 0
+    /// 扫描结束后的结论，短暂显示在副标题上
+    @Published private(set) var scanSummary: String = ""
     /// 收到的图片/视频自动写进系统相册
     @Published var autoSaveToPhotos: Bool {
         didSet { defaults.set(autoSaveToPhotos, forKey: Self.autoSaveKey) }
@@ -74,6 +82,9 @@ final class AppModel: ObservableObject {
     // 从分享扩展回来后自动弹出设备选择，避免用户再进列表里找待发送
     private var autoPickerPending = false
     private var autoPickerTimeout: DispatchWorkItem?
+
+    // 扫描过程中已经放进设备列表的命中数，用来判断哪些是新发现
+    private var scanAdded = 0
 
     init() {
         let defaults = UserDefaults.standard
@@ -364,24 +375,53 @@ final class AppModel: ObservableObject {
     var isAdvertiseLive: Bool { browser.isAdvertiseLive }
 
     /// Bonjour 之外的兜底：组播被屏蔽的网络里靠这个把设备找回来。
+    ///
+    /// 扫描是流式的：探测到一台就立刻加进设备列表，界面因此能边扫边显示，
+    /// 而不是盯着一个空转的圈等最长 12 秒。
     func scanSubnet() {
         guard !scanning else { return }
+        let startedAt = Date()
         scanning = true
+        scanFound = 0
+        scanSummary = ""
+        scanAdded = 0
         MobileLog.write("开始局域网扫描（默认端口 52345）")
-        SubnetScan.run { [weak self] found in
+        SubnetScan.run(onProgress: { [weak self] progress in
             guard let self else { return }
-            self.scanning = false
-            for hit in found {
-                self.browser.addDirect(Peer(name: hit.name, host: hit.host,
-                                            port: hit.port, isManual: true))
+            self.scanFound = progress.found.count
+            // 命中一台就立刻放进列表，设备可以边扫边冒出来
+            if progress.found.count > self.scanAdded {
+                for hit in progress.found[self.scanAdded...] {
+                    self.browser.addDirect(Peer(name: hit.name, host: hit.host,
+                                                port: hit.port, isManual: true, isScanned: true))
+                }
+                self.scanAdded = progress.found.count
             }
-            self.manualError = nil
-            self.resultText = found.isEmpty
-                ? moonT("扫描完成：没有发现设备，网络可能开了客户端隔离")
-                : moonTP("扫描到 %d 台设备", found.count)
-            self.resultIsError = found.isEmpty
-            MobileLog.write("扫描命中 \(found.count) 台")
-        }
+        }, completion: { [weak self] final in
+            guard let self else { return }
+            let found = final.found
+            self.scanFound = found.count
+            // 快网络下扫描转瞬即逝，至少让雷达转起来一小会儿，否则等于没反馈
+            let elapsed = Date().timeIntervalSince(startedAt)
+            let remaining = max(0, Self.minimumScanDuration - elapsed)
+            DispatchQueue.main.asyncAfter(deadline: .now() + remaining) {
+                self.scanning = false
+                self.manualError = nil
+                MobileLog.write("扫描命中 \(found.count) 台")
+                if found.isEmpty && self.peers.isEmpty {
+                    // 真的什么都没有，才值得用错误卡片说明下一步
+                    self.resultText = moonT("扫描完成：没有发现设备，网络可能开了客户端隔离")
+                    self.resultIsError = true
+                } else {
+                    self.scanSummary = found.isEmpty
+                        ? moonT("扫描完成 · 没有发现新设备")
+                        : moonTP("扫描完成 · 本次找到 %d 台设备", found.count)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + Self.summaryDuration) {
+                        self.scanSummary = ""
+                    }
+                }
+            }
+        })
     }
 
     // MARK: - 发送
@@ -528,6 +568,7 @@ final class AppModel: ObservableObject {
         sendLargeFile = totalBytes > 100 * 1024 * 1024
         resultText = ""
         resultIsError = false
+        scanSummary = ""
 
         // 大文件要跑几十秒到几分钟：这期间别让屏幕自动锁屏，
         // 也争取一点后台时间，避免用户切一下 App 回来发现传输已经断了
@@ -587,6 +628,7 @@ final class AppModel: ObservableObject {
         receiving = true
         receiveProgress = fraction
         receiveText = moonTF("接收中 %d%% · %@", Int(fraction * 100), name)
+        scanSummary = ""
         beginBackgroundTaskIfNeeded()
     }
 

@@ -6,6 +6,8 @@ struct Peer: Identifiable, Hashable {
     var host: String
     var port: UInt16
     var isManual: Bool = false
+    /// 通过局域网扫描兜底发现的设备：它同样是局域网直连，只是 Bonjour 没报上来
+    var isScanned: Bool = false
     /// 同一台设备的其它可用地址：首选地址连不通时依次尝试
     var alternatives: [String] = []
     /// 通过点对点（AWDL）连上：对方不在当前 Wi-Fi，而是在附近用直连通道

@@ -44,6 +44,26 @@ The stage has one local device mark at the bottom centre and peers arranged on d
 - The local device and its "This device" label stay at the bottom centre of the stage.
 - If names cannot fit, fall back to a full-width list instead of truncating every row.
 
+## Rescan
+
+The rescan action is a radar, not a spinner.
+
+- The scan streams. Devices found and the final outcome arrive as they happen. A device reaches the stage the moment the scan finds it, not twelve seconds later in one batch.
+- This device is the radar. A soft beam leaves it at the bottom centre and turns at a constant rate, bright at its leading edge and fading behind it.
+- The beam only lights the field above this device. What it points at behind the device is masked, as if the device itself blocked it, and it fades with distance so it never cuts a hard edge across the canvas. It stays behind the device tiles and never tints their labels.
+- The action button carries a miniature of the same radar, turning at the same rate and in the same phase, so the two read as one mechanism rather than two decorations.
+- The radar is an activity signal, not a percentage. It turns for exactly as long as the scan runs and vanishes when the scan ends. It never claims a number it cannot back up.
+- The real numbers live where numbers belong: the subtitle counts what this scan found, and each device appears the moment it is found.
+- Devices that arrive mid-scan land with a scale-and-fade spring, and the other devices make room for them.
+- The subtitle carries the scan state: what this scan has found so far, then the outcome.
+- A scan result never replaces the device stage. A successful scan keeps the list on screen and states the outcome in the subtitle; only a scan that found nothing at all raises the error card with the next step.
+- A scan stays visible for at least 1 s even when the network answers instantly, so the tap is always acknowledged.
+- Devices found by the scan are LAN discoveries, not manual entries: they read "Same Wi-Fi", never "Manual".
+
+Reduce Motion drops the spring and stops the radar. It stays on screen, pointing at one place.
+
+Android must match this. It is implemented on both platforms: Android draws the same beam in `MoonOrbitLayout` and the same dial in `MoonRadarDrawable`, sharing one radar period (`MoonRadar.PERIOD_MS` / `MoonRadar.period`) so the two read as one mechanism.
+
 ## States
 
 The same central slot switches in place, so two states never stack.
