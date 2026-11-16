@@ -272,18 +272,21 @@ final class BonjourService: NSObject {
         req.timeoutInterval = 3
         URLSession.shared.dataTask(with: req) { data, resp, _ in
             var peerName = name
-            if peerName.isEmpty || peerName == "手动对端" {
-                if let data,
-                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            var peerType = ""
+            if let data,
+               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if peerName.isEmpty || peerName == "手动对端",
                    let reported = object["device"] as? String, !reported.isEmpty {
                     peerName = reported
                 }
+                peerType = (object["type"] as? String) ?? ""
             }
             let ok = (resp as? HTTPURLResponse)?.statusCode == 200
             if ok {
                 self.upsert(Peer(host: host, port: port,
                                  name: peerName.isEmpty ? host : peerName,
-                                 isManual: true))
+                                 isManual: true,
+                                 deviceType: peerType))
             }
             DispatchQueue.main.async { completion(ok) }
         }.resume()

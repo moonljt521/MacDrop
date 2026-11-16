@@ -12,6 +12,8 @@ enum SubnetScan {
         let host: String
         let port: UInt16
         let name: String
+        /// 对方自报的设备类型（mac / phone / pad），老版本没有就留空
+        let deviceType: String
     }
 
     private static let defaultPort: UInt16 = 52345
@@ -86,7 +88,9 @@ enum SubnetScan {
             else { return }
             let port = UInt16(clamping: (object["port"] as? Int) ?? Int(defaultPort))
             let name = (object["device"] as? String) ?? host
-            result = Found(host: host, port: port, name: name.isEmpty ? host : name)
+            let type = (object["type"] as? String) ?? ""
+            result = Found(host: host, port: port, name: name.isEmpty ? host : name,
+                           deviceType: type)
         }.resume()
         // 连不通时（客户端隔离/防火墙） URLSession 会自己超时，这里只多给一点余量
         _ = done.wait(timeout: .now() + 1.5)

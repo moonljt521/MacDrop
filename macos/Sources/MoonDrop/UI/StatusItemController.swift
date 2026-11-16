@@ -101,7 +101,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                                       action: #selector(sendSelection(to:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = peer.id
-                item.image = NSImage(systemSymbolName: "arrow.up.right.circle", accessibilityDescription: nil)
+                // 图标画成对方真正的样子：手机是手机、平板是平板、Mac 是电脑
+                item.image = NSImage(systemSymbolName: PeerKind.symbol(for: peer.deviceType),
+                                     accessibilityDescription: nil)
                 menu.addItem(item)
             }
         }
@@ -274,7 +276,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             self.scanning = false
             for hit in found {
                 self.bonjour.addDirect(Peer(host: hit.host, port: hit.port,
-                                            name: hit.name, isManual: true))
+                                            name: hit.name, isManual: true,
+                                            deviceType: hit.deviceType))
             }
             Logger.write("局域网扫描命中 \(found.count) 台设备")
             self.rebuildMenu()

@@ -596,11 +596,15 @@ final class DropPanel: NSObject {
     }
 
     /// 测试钩子：用假的"三台设备在线"数据弹出选择器，检查布局
+    /// 三台刻意各是一种类型：电脑、手机、平板，一眼就能看出图标有没有画对
     func debugShowPicker() {
         let fake = [
-            Peer(host: "10.0.1.118", port: 52345, name: "moon_air的MacBook Air"),
-            Peer(host: "10.0.1.120", port: 52345, name: "客厅的 Mac mini"),
-            Peer(host: "10.0.1.131", port: 52345, name: "MacBook Pro（会议室）")
+            Peer(host: "10.0.1.118", port: 52345, name: "moon_air的MacBook Air",
+                 deviceType: PeerKind.mac),
+            Peer(host: "10.0.1.131", port: 52345, name: "我的 iPhone 13",
+                 deviceType: PeerKind.phone),
+            Peer(host: "10.0.1.120", port: 52345, name: "客厅的 iPad",
+                 deviceType: PeerKind.pad)
         ]
         updatePeers(fake)
         showPicker(for: [URL(fileURLWithPath: "/tmp/demo.txt")])
