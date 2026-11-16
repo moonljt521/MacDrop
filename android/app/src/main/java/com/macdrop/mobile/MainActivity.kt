@@ -38,6 +38,7 @@ import com.macdrop.mobile.net.Discovery
 import com.macdrop.mobile.net.NetUtil
 import com.macdrop.mobile.net.OutgoingFile
 import com.macdrop.mobile.net.Peer
+import com.macdrop.mobile.net.PeerKind
 import com.macdrop.mobile.net.ReceiverRuntime
 import com.macdrop.mobile.net.SubnetScan
 import com.macdrop.mobile.net.TransferClient
@@ -862,7 +863,8 @@ class MainActivity : Activity() {
     /** 扫描命中的设备放进列表；同一台只留一条 */
     private fun addScannedPeers(hits: List<SubnetScan.Found>) {
         for (hit in hits) {
-            val peer = Peer(name = hit.name, host = hit.host, port = hit.port, manual = true)
+            val peer = Peer(name = hit.name, host = hit.host, port = hit.port, manual = true,
+                deviceType = hit.deviceType)
             scannedPeers.removeAll { it.endpoint == peer.endpoint }
             scannedPeers.add(peer)
         }
@@ -966,7 +968,7 @@ class MainActivity : Activity() {
         if (!::nearfield.isInitialized) return
         val peers = mergedPeers()
         nearfield.setDevices(peers.map { peer ->
-            MoonNearbyDevice(peer.endpoint, peer.name, peerConnection(peer)) { showSendOptions(peer) }
+            MoonNearbyDevice(peer.endpoint, peer.name, peerConnection(peer), peer.deviceType) { showSendOptions(peer) }
         })
         updatePeerCaption()
         refreshSendState()
@@ -999,7 +1001,7 @@ class MainActivity : Activity() {
         val c = ui.colors
         val row = moonListRow(
             ui,
-            R.drawable.ic_moon_device,
+            PeerKind.iconFor(peer.deviceType),
             peer.name,
             subtitle = peerSubtitle(peer),
             trailing = moonIcon(ui, R.drawable.ic_moon_chevron, 16, c.textTertiary),
@@ -1009,6 +1011,13 @@ class MainActivity : Activity() {
         row.contentDescription = MoonStrings.f(
             "%s，%s:%d，点按发送文件", peer.name, peer.host, peer.port
         )
+        // 设备类型是对方自报的，认不出来就不念，图标已经画出来了
+        val kind = PeerKind.label(peer.deviceType)
+        if (kind.isNotEmpty()) {
+            row.contentDescription = MoonStrings.f(
+                "%s，%s，%s:%d，点按发送文件", kind, peer.name, peer.host, peer.port
+            )
+        }
         return row
     }
 
@@ -1475,12 +1484,14 @@ class MainActivity : Activity() {
                 val code = connection.responseCode
                 if (code != 200) throw IllegalStateException("HTTP $code")
                 val text = connection.inputStream.bufferedReader().use { it.readText() }
-                val reported = JSONObject(text).optString("device", host)
+                val json = JSONObject(text)
+                val reported = json.optString("device", host)
                 val peer = Peer(
                     name = name.ifEmpty { reported },
                     host = host,
                     port = port,
-                    manual = true
+                    manual = true,
+                    deviceType = json.optString("type")
                 )
                 runOnUiThread {
                     manualPeers.removeAll { it.host == host && it.port == port }

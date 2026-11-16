@@ -186,6 +186,12 @@ enum MoonStrings {
         "剪贴板里的文本已存成 txt，请选择接收设备":
             "Clipboard text saved as a .txt file. Choose a device to send to.",
 
+        // MARK: 设备类型
+        "手机": "Phone",
+        "平板": "Tablet",
+        "电脑": "Computer",
+        "%@ · %@": "%@ · %@",
+
         // MARK: 手动添加设备
         "对端地址": "Peer Address",
         "IP 地址": "IP Address",

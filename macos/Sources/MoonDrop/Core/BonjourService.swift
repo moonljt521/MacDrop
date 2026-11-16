@@ -13,11 +13,30 @@ struct Peer: Identifiable, Equatable {
     var alternatives: [String] = []
     /// 通过点对点（AWDL）连上：对方不在当前 Wi-Fi，而是在附近直连
     var isPeerToPeer: Bool = false
+    /// 对方自己上报的设备类型（mac / phone / pad），不靠名字猜
+    var deviceType: String = ""
 
     /// 去重用的地址键：设备改名后 Bonjour 实例名会变，按它才能认出是同一台
     var endpoint: String { "\(host):\(port)" }
 
     static func == (a: Peer, b: Peer) -> Bool { a.id == b.id }
+}
+
+/// 设备类型：由对方自己上报（Bonjour TXT 与 /macdrop/ping 都带 type），
+/// 不从设备名推断——名字是用户随便改的。
+enum PeerKind {
+    static let mac = "mac"
+    static let phone = "phone"
+    static let pad = "pad"
+
+    /// 对应形状的 SF Symbol
+    static func symbol(for type: String) -> String {
+        switch type {
+        case phone: return "iphone"
+        case pad: return "ipad"
+        default: return "desktopcomputer"
+        }
+    }
 }
 
 /// Bonjour 服务：广告本机 + 浏览对端。
@@ -91,8 +110,10 @@ final class BonjourService: NSObject {
                              port: Int32(ownPort))
         svc.delegate = self
         // TXT 带一个装机生成的稳定 id，方便对端识别与排查；不靠它过滤自己
+        // 再带一个 type：对端据此画对应形状的图标（手机/平板/电脑）
         svc.setTXTRecord(NetService.data(fromTXTRecord: [
-            "id": Data(Config.shared.deviceID.utf8)
+            "id": Data(Config.shared.deviceID.utf8),
+            "type": Data(PeerKind.mac.utf8)
         ]))
         published = false
         svc.publish()
@@ -364,8 +385,18 @@ extension BonjourService: NetServiceDelegate {
                     port: UInt16(clamping: sender.port),
                     name: sender.name,
                     alternatives: alternatives,
-                    isPeerToPeer: best.ip.hasPrefix("169.254.")),
+                    isPeerToPeer: best.ip.hasPrefix("169.254."),
+                    deviceType: BonjourService.type(from: sender)),
                serviceName: sender.name)
+    }
+
+    /// 对端在 TXT 里自报的设备类型；老版本没有这个字段就留空
+    private static func type(from service: NetService) -> String {
+        guard let data = service.txtRecordData() else { return "" }
+        let record = NetService.dictionary(fromTXTRecord: data)
+        guard let typeData = record["type"],
+              let type = String(data: typeData, encoding: .utf8) else { return "" }
+        return type
     }
 
     func netService(_ sender: NetService,

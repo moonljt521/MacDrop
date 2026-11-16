@@ -502,7 +502,7 @@ final class DropPanel: NSObject {
         statusLabel.font = .systemFont(ofSize: 13.5, weight: .medium)
 
         for peer in peers.prefix(Self.maxPickerRows) {
-            let row = DeviceRow(title: peer.name, symbol: "desktopcomputer")
+            let row = DeviceRow(title: peer.name, symbol: PeerKind.symbol(for: peer.deviceType))
             row.onClick = { [weak self] in self?.choose(peer) }
             dropView.addSubview(row)
             pickerRows.append(row)

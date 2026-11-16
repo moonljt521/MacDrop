@@ -15,6 +15,8 @@ enum SubnetScan {
         let host: String
         let port: UInt16
         let name: String
+        /// 对方自报的设备类型（mac / phone / pad），老版本没有就留空
+        let deviceType: String
     }
 
     /// 扫描过程中的真实状态。没有任何计时器成分：probed 是真的探测过多少个地址。
@@ -100,7 +102,9 @@ enum SubnetScan {
             else { return }
             let port = UInt16(clamping: (object["port"] as? Int) ?? Int(defaultPort))
             let name = (object["device"] as? String) ?? host
-            result = Found(host: host, port: port, name: name.isEmpty ? host : name)
+            let type = (object["type"] as? String) ?? ""
+            result = Found(host: host, port: port, name: name.isEmpty ? host : name,
+                           deviceType: type)
         }.resume()
         _ = done.wait(timeout: .now() + 1.5)
         return result

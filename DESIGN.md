@@ -9,7 +9,7 @@ Tokens live in `ios/MoonDrop/UI/MoonTheme.swift` and `android/app/src/main/java/
 - The nearby-device stage is the focal point; the file/photos tray is always within thumb reach.
 - Show only states that exist. Pending is not sent, and progress is real, never simulated.
 - Neutral surfaces and system type carry the hierarchy; brand blue is reserved for progress, links, and status.
-- Never infer a device type, model, or identity from its name.
+- Never infer a device type, model, or identity from its name; the peer reports its own type.
 
 ## Screen Anatomy
 
@@ -27,6 +27,8 @@ Settings, connection details, storage help, and manual add are sheets. History i
 ## Device Stage
 
 The stage has one local device mark at the bottom centre and peers arranged on decorative arcs. Peers are real discovered endpoints only; the arcs are decoration, not distance.
+
+Each peer shows the shape of the device it actually is: phone, tablet, or computer. The type comes from the peer itself — it is advertised in the Bonjour TXT record and in the `/macdrop/ping` response — never inferred from the device name, because names are whatever the user typed. A peer that reports no type keeps the generic computer mark; its icon may be wrong, but nothing about it is invented. The local device mark follows the same rule and shows a tablet on iPad and a tablet-sized Android device.
 
 | Peers | Arrangement |
 |---|---|
@@ -181,7 +183,7 @@ Semantic roles, never ad-hoc sizes:
 
 ## Copy
 
-- Say "device", never "other Mac/phone", because the protocol does not expose peer type.
+- Say "device" in prose, never "other Mac/phone" as a claim about the peer. The shape may show phone, tablet or computer, because the peer reports its own type; the words stay generic.
 - Use "This device", "Nearby", "Pending", "Sent", "Received".
 - Errors state what failed and the next step; do not blame the network without evidence.
 - No fake success: a pending file is described as waiting, never as delivered.

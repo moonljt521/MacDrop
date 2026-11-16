@@ -274,11 +274,18 @@ private struct MoonFieldPeerButton: View {
         }
         .buttonStyle(MoonPressStyle())
         .accessibilityLabel(moonTF("发送到 %@", peer.name))
-        .accessibilityValue(connectionType)
+        .accessibilityValue(accessibilityRoute)
+    }
+
+    /// 朗读用：设备类型 + 连接方式。类型是对方自报的，认不出来就只说连接方式。
+    private var accessibilityRoute: String {
+        let kind = PeerKind.label(for: peer.deviceType)
+        guard !kind.isEmpty else { return connectionType }
+        return moonTF("%@ · %@", kind, connectionType)
     }
 
     private var glyph: some View {
-        Image(systemName: "desktopcomputer")
+        Image(systemName: PeerKind.symbol(for: peer.deviceType))
             .font(.system(size: compact ? 27 : 32, weight: .regular))
             .foregroundStyle(MoonTheme.textPrimary)
             .frame(width: compact ? 56 : 68, height: compact ? 56 : 68)
@@ -321,7 +328,7 @@ private struct MoonLocalDevice: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            Image(systemName: "iphone")
+            Image(systemName: UIDevice.current.userInterfaceIdiom == .pad ? "ipad" : "iphone")
                 .font(.system(size: 30, weight: .regular))
                 .foregroundStyle(MoonTheme.primary)
                 .frame(width: 78, height: 78)

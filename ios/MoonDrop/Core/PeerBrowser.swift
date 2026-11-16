@@ -1,7 +1,9 @@
 import Foundation
+import UIKit
 
 /// Bonjour 发现 + 本机广播，协议与 macOS 端一致：_macdrop._tcp
-/// TXT 里额外带一个稳定的 id，用于可靠地过滤掉自己（Mac 端不读 TXT，不受影响）。
+/// TXT 里额外带一个稳定的 id，用于可靠地过滤掉自己（Mac 端不读 TXT，不受影响），
+/// 另带一个 type 告诉对端自己是手机还是平板，对端据此画对应形状的图标。
 final class PeerBrowser: NSObject {
 
     var onPeersChanged: (([Peer]) -> Void)?
@@ -37,6 +39,11 @@ final class PeerBrowser: NSObject {
     /// 广播是否已确认上线（别人能不能看到我）
     var isAdvertiseLive: Bool { published }
 
+    /// 本机类型：iPad 与 iPhone 分开上报，对端才能画出对应形状的图标
+    static var localType: String {
+        UIDevice.current.userInterfaceIdiom == .pad ? PeerKind.pad : PeerKind.phone
+    }
+
     init(ownID: String) {
         self.ownID = ownID
         super.init()
@@ -70,7 +77,10 @@ final class PeerBrowser: NSObject {
                                  name: instanceName,
                                  port: Int32(ownPort))
         service.delegate = self
-        service.setTXTRecord(NetService.data(fromTXTRecord: ["id": Data(ownID.utf8)]))
+        service.setTXTRecord(NetService.data(fromTXTRecord: [
+            "id": Data(ownID.utf8),
+            "type": Data(PeerBrowser.localType.utf8)
+        ]))
         published = false
         service.publish()
         advertiser = service
@@ -436,8 +446,18 @@ extension PeerBrowser: NetServiceDelegate {
         }
         upsert(Peer(name: sender.name, host: best.ip, port: UInt16(clamping: sender.port),
                     alternatives: alternatives,
-                    isPeerToPeer: best.ip.hasPrefix("169.254.")),
+                    isPeerToPeer: best.ip.hasPrefix("169.254."),
+                    deviceType: PeerBrowser.type(from: sender)),
                serviceName: sender.name)
+    }
+
+    /// 对端在 TXT 里自报的设备类型；老版本没有这个字段就留空
+    private static func type(from service: NetService) -> String {
+        guard let data = service.txtRecordData() else { return "" }
+        let record = NetService.dictionary(fromTXTRecord: data)
+        guard let typeData = record["type"],
+              let type = String(data: typeData, encoding: .utf8) else { return "" }
+        return type
     }
 
     func netService(_ sender: NetService, didNotResolve errorDict: [String: NSNumber]) {

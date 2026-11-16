@@ -58,7 +58,7 @@ class ReceiverService : Service() {
         )
 
         val store = MediaStoreStore(this)
-        val receiver = ReceiverServer(store, DeviceIdentity.name(this))
+        val receiver = ReceiverServer(store, DeviceIdentity.name(this), DeviceIdentity.type(this))
         receiver.onProgress = { fraction, name ->
             ReceiverRuntime.receiving = true
             ReceiverRuntime.progress = fraction
@@ -130,6 +130,8 @@ class ReceiverService : Service() {
             serviceType = SERVICE_TYPE
             this.port = port
             setAttribute("id", DeviceIdentity.id(this@ReceiverService))
+            // type 告诉对端本机是手机还是平板，对端据此画对应形状的图标
+            setAttribute("type", DeviceIdentity.type(this@ReceiverService))
         }
         val listener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {

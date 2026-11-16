@@ -38,7 +38,9 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.macdrop.mobile.DeviceIdentity
 import com.macdrop.mobile.R
+import com.macdrop.mobile.net.PeerKind
 
 // MARK: - 基础图形
 
@@ -662,6 +664,8 @@ data class MoonNearbyDevice(
     val id: String,
     val name: String,
     val connection: String,
+    /** 对方自报的设备类型（mac / phone / pad），决定图标形状 */
+    val deviceType: String = "",
     val onClick: () -> Unit
 )
 
@@ -670,7 +674,7 @@ private class MoonPeerButton(private val ui: MoonUi, device: MoonNearbyDevice) :
     private var density = -1
     val id: String = device.id
     private var device = device
-    private val icon = moonIcon(ui, R.drawable.ic_moon_device, 34, ui.colors.textPrimary)
+    private val icon = moonIcon(ui, PeerKind.iconFor(device.deviceType), 34, ui.colors.textPrimary)
     private val glyph = FrameLayout(context).apply {
         background = moonRounded(ui, ui.colors.surface, 24)
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
@@ -710,6 +714,7 @@ private class MoonPeerButton(private val ui: MoonUi, device: MoonNearbyDevice) :
         device = next
         name.text = next.name
         connection.text = next.connection
+        icon.setImageResource(PeerKind.iconFor(next.deviceType))
         contentDescription = MoonStrings.f("发送到 %s，%s", next.name, next.connection)
         setOnClickListener { next.onClick() }
     }
@@ -795,7 +800,7 @@ private class MoonOrbitLayout(private val ui: MoonUi) : ViewGroup(ui.context) {
         addView(FrameLayout(context).apply {
             background = moonRounded(ui, ui.colors.surfaceMuted, 999)
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-            addView(moonIcon(ui, R.drawable.ic_moon_device, 30, ui.colors.primary),
+            addView(moonIcon(ui, PeerKind.iconFor(DeviceIdentity.type(ui.context)), 30, ui.colors.primary),
                 FrameLayout.LayoutParams(ui.dp(30), ui.dp(30), Gravity.CENTER))
         }, LinearLayout.LayoutParams(ui.dp(78), ui.dp(78)))
         addView(moonText(ui, MoonStrings.t("此设备"), 12f, ui.colors.textSecondary).apply {

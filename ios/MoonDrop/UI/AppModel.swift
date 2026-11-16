@@ -359,11 +359,13 @@ final class AppModel: ObservableObject {
             }
             let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             let reported = object?["device"] as? String
+            let reportedType = object?["type"] as? String ?? ""
             let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
             let peer = Peer(name: trimmedName.isEmpty ? (reported ?? trimmedHost) : trimmedName,
                             host: trimmedHost,
                             port: port,
-                            isManual: true)
+                            isManual: true,
+                            deviceType: reportedType)
             manual.removeAll { $0.host == trimmedHost && $0.port == port }
             manual.append(peer)
             mergePeers()
@@ -418,7 +420,8 @@ final class AppModel: ObservableObject {
             if progress.found.count > self.scanAdded {
                 for hit in progress.found[self.scanAdded...] {
                     self.browser.addDirect(Peer(name: hit.name, host: hit.host,
-                                                port: hit.port, isManual: true, isScanned: true))
+                                                port: hit.port, isManual: true, isScanned: true,
+                                                deviceType: hit.deviceType))
                 }
                 self.scanAdded = progress.found.count
             }

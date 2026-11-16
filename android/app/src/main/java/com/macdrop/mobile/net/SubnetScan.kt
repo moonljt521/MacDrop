@@ -22,7 +22,9 @@ import java.util.concurrent.Executors
  */
 object SubnetScan {
 
-    data class Found(val host: String, val port: Int, val name: String)
+    data class Found(val host: String, val port: Int, val name: String,
+                     /** 对方自报的设备类型（mac / phone / pad），老版本没有就留空 */
+                     val deviceType: String = "")
 
     /** 扫描过程中的真实状态。probed 是真的探测过多少个地址。 */
     data class Progress(val probed: Int, val total: Int, val found: List<Found>)
@@ -104,7 +106,8 @@ object SubnetScan {
             Found(
                 host = host,
                 port = json.optInt("port", DEFAULT_PORT),
-                name = json.optString("device").ifEmpty { host }
+                name = json.optString("device").ifEmpty { host },
+                deviceType = json.optString("type")
             )
         } catch (_: Exception) {
             null

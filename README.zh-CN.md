@@ -48,7 +48,7 @@
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| GET | `/macdrop/ping` | 健康检查：设备名与端口 |
+| GET | `/macdrop/ping` | 健康检查：设备名、端口与设备类型（`mac` / `phone` / `pad`） |
 | POST | `/macdrop/begin?id=&name=&path=&size=&root=` | 声明传输并创建暂存文件 |
 | POST | `/macdrop/chunk?id=&offset=` | 追加分块（请求体为原始字节） |
 | POST | `/macdrop/finish?id=` | 校验并交付 |

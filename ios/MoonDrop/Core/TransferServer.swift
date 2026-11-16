@@ -102,7 +102,9 @@ final class TransferServer {
         switch (request.method, request.path) {
 
         case ("GET", "/macdrop/ping"):
-            return .json(["device": deviceName, "version": 1, "port": Int(port)])
+            // type 告诉对端本机是手机还是平板，扫描兜底时也能画出正确图标
+            return .json(["device": deviceName, "version": 1, "port": Int(port),
+                          "type": PeerBrowser.localType])
 
         case ("POST", "/macdrop/begin"):
             guard let id = request.query["id"],

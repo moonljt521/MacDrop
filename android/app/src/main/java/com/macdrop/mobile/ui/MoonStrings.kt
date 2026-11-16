@@ -62,6 +62,11 @@ object MoonStrings {
         "剪贴板" to "Clipboard",
         "剪贴板里的文本已存成 txt，请选择接收设备" to
             "Clipboard text saved as a .txt file. Choose a device to send to.",
+        "手机" to "Phone",
+        "平板" to "Tablet",
+        "电脑" to "Computer",
+        "%s，%s，%s:%d，点按发送文件" to
+            "%s, %s, %s:%d, double tap to send",
         "后台接收" to "Background Receiving",
         "去设置" to "Open Settings",
         "已允许" to "Allowed",

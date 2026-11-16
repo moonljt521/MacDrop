@@ -292,7 +292,8 @@ class Discovery(context: Context, private val deviceId: String) {
         MobileLog.write("对端就绪：$name → $host:$port")
         // 链路本地地址 = 点对点直连（对方不在当前 Wi-Fi）
         val peer = Peer(name = name, host = host, port = port,
-                        peerToPeer = host.startsWith("169.254."))
+                        peerToPeer = host.startsWith("169.254."),
+                        deviceType = peerType(info))
         synchronized(lock) {
             pendingRemovals.remove(name)?.let { mainHandler.removeCallbacks(it) }
             resolveAttempts.remove(name)
@@ -306,6 +307,10 @@ class Discovery(context: Context, private val deviceId: String) {
         }
         publish()
     }
+
+    /** 对端在 TXT 里自报的设备类型；老版本没有这个字段就留空 */
+    private fun peerType(info: NsdServiceInfo): String =
+        info.attributes?.get("type")?.toString(Charsets.UTF_8) ?: ""
 
     private fun isSelf(info: NsdServiceInfo, host: String, port: Int): Boolean {
         val txtId = info.attributes?.get("id")?.toString(Charsets.UTF_8)

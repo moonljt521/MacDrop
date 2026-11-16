@@ -13,7 +13,9 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class ReceiverServer(
     private val store: MediaStoreStore,
-    var deviceName: String
+    var deviceName: String,
+    /** 本机设备类型（mac / phone / pad），扫描兜底时对端据此画图标 */
+    var deviceType: String = ""
 ) {
 
     private data class Entry(
@@ -54,6 +56,7 @@ class ReceiverServer(
                     .put("device", deviceName)
                     .put("version", 1)
                     .put("port", port)
+                    .put("type", deviceType)
                     .toString()
                 HttpServer.Response.json(body)
             }

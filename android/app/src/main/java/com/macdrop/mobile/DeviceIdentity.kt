@@ -2,6 +2,7 @@ package com.macdrop.mobile
 
 import android.content.Context
 import android.os.Build
+import com.macdrop.mobile.net.PeerKind
 import java.util.UUID
 
 object DeviceIdentity {
@@ -27,6 +28,12 @@ object DeviceIdentity {
         if (saved != null) return saved
         val model = Build.MODEL?.trim().orEmpty()
         return if (model.isEmpty()) "Android" else model
+    }
+
+    /** 设备类型：平板与手机分开上报，对端才能画出对应形状的图标 */
+    fun type(context: Context): String {
+        val smallest = context.resources.configuration.smallestScreenWidthDp
+        return if (smallest >= 600) PeerKind.PAD else PeerKind.PHONE
     }
 
     fun customName(context: Context): String? {

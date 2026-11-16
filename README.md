@@ -48,7 +48,7 @@ Sender                                  Receiver
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/macdrop/ping` | Health check: device name and port |
+| GET | `/macdrop/ping` | Health check: device name, port and device type (`mac` / `phone` / `pad`) |
 | POST | `/macdrop/begin?id=&name=&path=&size=&root=` | Announce a transfer, create the staging file |
 | POST | `/macdrop/chunk?id=&offset=` | Append a chunk (raw body) |
 | POST | `/macdrop/finish?id=` | Verify and deliver |
