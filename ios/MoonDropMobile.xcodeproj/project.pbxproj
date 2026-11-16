@@ -28,6 +28,7 @@
 		D4A279E41A3E95A3D2631733 /* PeerBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46D3DFAD7AF764DD61D5BE22 /* PeerBrowser.swift */; };
 		DE5815A3467BD28A605BE71E /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31BCD6740F3D4317281A2C41 /* Models.swift */; };
 		DE7C21C89B25BF411F88279B /* PeerBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46D3DFAD7AF764DD61D5BE22 /* PeerBrowser.swift */; };
+		E567EE19B1CA30EEAA4F9915 /* ClipboardCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4472F0E008F584118DB0853D /* ClipboardCapture.swift */; };
 		F28DD9C079457E46E30709C4 /* QuickLookPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = D035017CE9D5633355C83D14 /* QuickLookPreview.swift */; };
 /* End PBXBuildFile section */
 
@@ -62,6 +63,7 @@
 		28AD674F82A45E9BB2B18A6D /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		3119C80177161AEBAA4C3CF9 /* MoonTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoonTheme.swift; sourceTree = "<group>"; };
 		31BCD6740F3D4317281A2C41 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		4472F0E008F584118DB0853D /* ClipboardCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardCapture.swift; sourceTree = "<group>"; };
 		46D3DFAD7AF764DD61D5BE22 /* PeerBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerBrowser.swift; sourceTree = "<group>"; };
 		4BD321994E24646CC4287429 /* MoonDropMobile.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = MoonDropMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		59E4503850C120000F88B8FA /* TransferServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferServer.swift; sourceTree = "<group>"; };
@@ -92,6 +94,7 @@
 		624BB2287A524ACF2B55B149 /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				4472F0E008F584118DB0853D /* ClipboardCapture.swift */,
 				7455CEAE9F7D5D1E9DE28DAC /* FileStore.swift */,
 				F9BD9983767689966A48E4FD /* HTTPServer.swift */,
 				31BCD6740F3D4317281A2C41 /* Models.swift */,
@@ -255,6 +258,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C87DA4DCC7C2F571B967BAEF /* AppModel.swift in Sources */,
+				E567EE19B1CA30EEAA4F9915 /* ClipboardCapture.swift in Sources */,
 				36B1C77B04CA4D531B33B3AC /* ContentView.swift in Sources */,
 				D2584128A63C42A24E86A886 /* FileStore.swift in Sources */,
 				8E8C7E6F9EEDC290ED91FFC4 /* HTTPServer.swift in Sources */,

@@ -9,6 +9,9 @@ final class AppModel: ObservableObject {
     private static let deviceIDKey = "com.macdrop.mobile.deviceID"
     private static let deviceNameKey = "com.macdrop.mobile.deviceName"
     private static let autoSaveKey = "com.macdrop.mobile.autoSavePhotos"
+    private static let autoClipboardKey = "com.macdrop.mobile.autoCaptureClipboard"
+    private static let clipboardHashKey = "com.macdrop.mobile.clipboardHash"
+    private static let clipboardAtKey = "com.macdrop.mobile.clipboardAt"
     private static let savedPhotosKey = "com.macdrop.mobile.savedPhotoPaths"
     private static let sentKey = "com.macdrop.mobile.sentRecords"
     private static let appGroupID = "group.com.macdrop.mobile"
@@ -16,6 +19,11 @@ final class AppModel: ObservableObject {
     private static let minimumScanDuration: TimeInterval = 1
     /// 扫描结论在副标题上停留的时间
     private static let summaryDuration: TimeInterval = 5
+    /// 同一段剪贴板文本在这个时间窗内不重复捕获
+    private static let clipboardRepeatWindow: TimeInterval = 600
+    /// 系统「允许粘贴」提示要人来点，可能过几十秒才被处理，
+    /// 所以这里按递增的间隔重试，累计约一分钟内都还有机会读到内容。
+    private static let clipboardRetryDelays: [TimeInterval] = [1, 2, 3, 5, 8, 13, 21]
 
     @Published var deviceName: String
     let deviceID: String
@@ -38,6 +46,12 @@ final class AppModel: ObservableObject {
     @Published var autoSaveToPhotos: Bool {
         didSet { defaults.set(autoSaveToPhotos, forKey: Self.autoSaveKey) }
     }
+    /// 进入 App 时自动把剪贴板里的纯文本存成 txt
+    @Published var autoCaptureClipboard: Bool {
+        didSet { defaults.set(autoCaptureClipboard, forKey: Self.autoClipboardKey) }
+    }
+    /// 待发送来自剪贴板时，在标题下方说明这批文件从哪来
+    @Published private(set) var pendingHint: String = ""
 
     /// 已经写入系统相册的文件路径。PHAsset 每次保存都会新建一个资源，自动保存和手动
     /// 「存入相册」必须共用这份记录，否则用户点一下按钮相册里就会多出一张一样的照片。
@@ -75,6 +89,11 @@ final class AppModel: ObservableObject {
     private var incomingBuffer: [URL] = []
     private var incomingFlushWork: DispatchWorkItem?
 
+    // 剪贴板生成的待发送文件：发出去或取消时删掉
+    private var clipboardEntries: [(url: URL, fingerprint: String)] = []
+    /// 系统「允许粘贴」提示可能晚于这一次读取，稍后重试
+    private var clipboardRetry = 0
+
     // 发送前临时排队，等用户选完设备再开始
     private var queuedPickedURLs: [URL] = []
     private var pickerForPending = false
@@ -108,6 +127,7 @@ final class AppModel: ObservableObject {
         let initialName = (savedName?.isEmpty == false) ? savedName! : (rawName.isEmpty ? "iPhone" : rawName)
         deviceName = initialName
         autoSaveToPhotos = defaults.object(forKey: Self.autoSaveKey) as? Bool ?? true
+        autoCaptureClipboard = defaults.object(forKey: Self.autoClipboardKey) as? Bool ?? true
         savedPhotoPaths = Set(defaults.stringArray(forKey: Self.savedPhotosKey) ?? [])
         sentRecords = AppModel.loadSentRecords(from: defaults)
 
@@ -119,6 +139,8 @@ final class AppModel: ObservableObject {
 
         // 必须在任何 onOpenURL 取回文件之前清，避免误删刚取回的分享副本
         cleanupAbandonedIncoming()
+        // 上次没发出去的剪贴板文件已经没用了，待发送队列不跨启动保留
+        ClipboardCapture.cleanup()
 
         browser.onPeersChanged = { [weak self] peers in
             Task { @MainActor in self?.applyDiscovered(peers) }
@@ -165,6 +187,9 @@ final class AppModel: ObservableObject {
         if ingestSharedFiles() {
             schedulePendingPicker()
         }
+        // 每次回到前台都重新给一轮重试预算：上次没点「允许粘贴」，这次还有机会
+        clipboardRetry = 0
+        captureClipboard()
     }
 
     /// 从 moondrop://incoming 进来：取回文件后直接进入选设备流程。
@@ -424,6 +449,66 @@ final class AppModel: ObservableObject {
         })
     }
 
+    // MARK: - 剪贴板
+
+    /// 进入前台时捕获剪贴板文本：存成 txt，排进待发送队列。
+    private func captureClipboard() {
+        guard autoCaptureClipboard else { return }
+        switch ClipboardCapture.read() {
+        case .empty:
+            clipboardRetry = 0
+        case .denied:
+            // 系统还没放行粘贴：用户点「允许粘贴」通常就在几秒内
+            scheduleClipboardRetry()
+        case .text(let text):
+            clipboardRetry = 0
+            queueClipboardText(text)
+        }
+    }
+
+    /// 系统「允许粘贴」提示晚于这一次读取时，过一会儿再试
+    private func scheduleClipboardRetry() {
+        guard clipboardRetry < Self.clipboardRetryDelays.count else { return }
+        let delay = Self.clipboardRetryDelays[clipboardRetry]
+        clipboardRetry += 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.captureClipboard()
+        }
+    }
+
+    /// 存成 txt 并排进待发送队列；同一段文本不重复入队
+    private func queueClipboardText(_ text: String) {
+        let fingerprint = ClipboardCapture.fingerprint(text)
+        if clipboardEntries.contains(where: { $0.fingerprint == fingerprint }) { return }
+        if let saved = defaults.string(forKey: Self.clipboardHashKey),
+           saved == fingerprint,
+           let at = defaults.object(forKey: Self.clipboardAtKey) as? Date,
+           Date().timeIntervalSince(at) < Self.clipboardRepeatWindow {
+            return
+        }
+        guard let url = ClipboardCapture.writeTextFile(text, prefix: moonT("剪贴板")) else { return }
+        clipboardEntries.append((url: url, fingerprint: fingerprint))
+        defaults.set(fingerprint, forKey: Self.clipboardHashKey)
+        defaults.set(Date(), forKey: Self.clipboardAtKey)
+        pendingURLs.append(url)
+        pendingCount = pendingURLs.count
+        pendingHint = moonT("剪贴板里的文本已存成 txt，请选择接收设备")
+        MobileLog.write("已捕获剪贴板文本，待发送 \(pendingCount) 个")
+    }
+
+    /// 剪贴板文件发出去或被取消时删掉，别把临时文件留在磁盘上
+    private func removeClipboardFiles(in urls: [URL]) {
+        let targets = Set(urls.map { $0.standardizedFileURL.path })
+        let removed = clipboardEntries.filter { targets.contains($0.url.standardizedFileURL.path) }
+        guard !removed.isEmpty else { return }
+        for entry in removed {
+            try? FileManager.default.removeItem(at: entry.url)
+        }
+        let removedPaths = Set(removed.map { $0.url.standardizedFileURL.path })
+        clipboardEntries.removeAll { removedPaths.contains($0.url.standardizedFileURL.path) }
+        if clipboardEntries.isEmpty { pendingHint = "" }
+    }
+
     // MARK: - 发送
 
     /// 选完文件先弹设备选择器；真正发送在 choosePeer 里。
@@ -517,6 +602,7 @@ final class AppModel: ObservableObject {
                 case .success:
                     // 发送成功后删掉分享扩展复制进来的临时副本
                     self.removeIncomingCopies(of: urls)
+                    self.removeClipboardFiles(in: urls)
                     MobileLog.write("待发送已清空（\(urls.count) 个）")
                 case .failure:
                     // 失败就把文件放回待发送，用户可以直接重试
@@ -535,9 +621,14 @@ final class AppModel: ObservableObject {
             url.stopAccessingSecurityScopedResource()
         }
         removeIncomingCopies(of: pendingURLs)
+        removeClipboardFiles(in: pendingURLs)
+        // 取消就是不要了：同一段文本下次回到前台还能重新捕获
+        defaults.removeObject(forKey: Self.clipboardHashKey)
+        defaults.removeObject(forKey: Self.clipboardAtKey)
         pendingScopes = []
         pendingURLs = []
         pendingCount = 0
+        pendingHint = ""
         autoPickerPending = false
         autoPickerTimeout?.cancel()
         autoPickerTimeout = nil

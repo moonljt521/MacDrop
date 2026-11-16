@@ -78,12 +78,25 @@ The same central slot switches in place, so two states never stack.
 
 The ring uses measured progress only. It never animates on a timer or fills to a guessed value.
 
+## Clipboard Capture
+
+Entering the app can turn the clipboard's plain text into a pending file.
+
+- The capture runs when the app comes to the foreground, and only plain text is taken; images and files on the clipboard are ignored.
+- The text becomes a `.txt` file named `Clipboard-<timestamp>.txt` (`剪贴板-<时间戳>.txt` in Chinese), written to the app's private storage, never into Documents.
+- It joins the same pending queue as shared files. The app never picks a device on its own: the user chooses the target and confirms, exactly like any other pending file.
+- The same text is captured once. A repeat of identical text inside a 10-minute window, or text already sitting in the pending queue, is ignored. Cancelling the pending queue clears that memory so the text can be captured again.
+- Captured files are deleted once they are sent, and cancelling the queue deletes them too. Nothing is left behind on disk.
+- A settings switch, "Auto-capture clipboard text", turns the whole thing off. It is on by default.
+- iOS asks for paste permission: the first read shows the system "Allow Paste?" prompt, and the read is retried for a few seconds so the capture still lands after the user allows it. Android reads the clipboard only while focused and shows the system "Pasted" toast.
+- The pending state names the source, so the user knows where the file came from.
+
 ## Tray and Sheets
 
 - Tray is anchored above the safe area: file action on `ink`, photos action on `surface`, both at least 56 pt/dp.
 - Recent transfer is one compact row and opens the complete history sheet. At very large text sizes it moves into the scroll so the tray does not consume the screen.
 - History: sent/received segmented control, date-grouped sections, preview/share/save/delete per row, explicit Close, and a native alert with a visible Cancel for destructive clear.
-- Settings: appearance, language, auto-save to photos, background receiving, connection details, storage help, version.
+- Settings: appearance, language, auto-save to photos, auto-capture clipboard text, background receiving, connection details, storage help, version.
 - Every sheet has a visible close or done control; drag-to-dismiss is never the only exit.
 
 ## Color

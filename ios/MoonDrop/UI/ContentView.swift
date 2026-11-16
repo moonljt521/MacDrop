@@ -222,7 +222,9 @@ struct ContentView: View {
         switch fieldState {
         case 1, 2: return moonT("设备之间直连，不经过云端")
         case 3: return moonT("每一次传递，都有迹可循")
-        case 4: return moonT("共享的文件尚未发送，请选择接收设备")
+        case 4: return model.pendingHint.isEmpty
+            ? moonT("共享的文件尚未发送，请选择接收设备")
+            : model.pendingHint
         default:
             if model.scanning { return scanSubtitle }
             if !model.scanSummary.isEmpty { return model.scanSummary }
@@ -700,6 +702,8 @@ struct MoonSettingsSheet: View {
 
                 Section {
                     Toggle(moonT("收到的照片自动存入相册"), isOn: $model.autoSaveToPhotos)
+                        .tint(MoonTheme.primary)
+                    Toggle(moonT("自动捕获剪贴板文本"), isOn: $model.autoCaptureClipboard)
                         .tint(MoonTheme.primary)
                 }
 

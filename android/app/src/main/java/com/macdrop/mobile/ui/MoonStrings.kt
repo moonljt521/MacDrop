@@ -58,6 +58,10 @@ object MoonStrings {
         "语言：简体中文" to "Language: 简体中文",
         "语言：English" to "Language: English",
         "收到的照片自动存入相册" to "Save received photos to Photos automatically",
+        "自动捕获剪贴板文本" to "Auto-capture clipboard text",
+        "剪贴板" to "Clipboard",
+        "剪贴板里的文本已存成 txt，请选择接收设备" to
+            "Clipboard text saved as a .txt file. Choose a device to send to.",
         "后台接收" to "Background Receiving",
         "去设置" to "Open Settings",
         "已允许" to "Allowed",

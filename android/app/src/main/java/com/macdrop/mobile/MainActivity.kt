@@ -41,6 +41,9 @@ import com.macdrop.mobile.net.Peer
 import com.macdrop.mobile.net.ReceiverRuntime
 import com.macdrop.mobile.net.SubnetScan
 import com.macdrop.mobile.net.TransferClient
+import com.macdrop.mobile.store.ClipboardCapture
+import com.macdrop.mobile.store.ClipboardEntry
+import com.macdrop.mobile.store.ClipboardSettings
 import com.macdrop.mobile.store.GallerySettings
 import com.macdrop.mobile.store.MediaStoreStore
 import com.macdrop.mobile.store.ReceivedEntry
@@ -76,6 +79,7 @@ import com.macdrop.mobile.ui.moonText
 import com.macdrop.mobile.ui.moonTopBar
 import com.macdrop.mobile.ui.tracked
 import org.json.JSONObject
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.text.SimpleDateFormat
@@ -94,6 +98,7 @@ class MainActivity : Activity() {
     private lateinit var heroStatusDot: MoonStatusDot
     private lateinit var heroStatusText: TextView
     private lateinit var autoSaveSwitch: MoonSwitch
+    private lateinit var clipboardSwitch: MoonSwitch
     private lateinit var batteryValue: TextView
     private lateinit var batteryRow: LinearLayout
 
@@ -116,8 +121,16 @@ class MainActivity : Activity() {
 
     private lateinit var pendingCard: LinearLayout
     private lateinit var pendingTitle: TextView
+    private lateinit var pendingHint: TextView
     private lateinit var pendingSendButton: MoonButton
     private val pendingUris = mutableListOf<Uri>()
+
+    // 剪贴板生成的待发送文件：发出去或取消时删掉
+    private val clipboardEntries = mutableListOf<ClipboardEntry>()
+    /** 待发送来自剪贴板时的说明文案 */
+    private var pendingHintText = ""
+    /** 焦点还没落到窗口上时的重试次数 */
+    private var clipboardRetry = 0
 
     // These views belong only to the currently presented history sheet.
     private var historySheet: MoonSheet? = null
@@ -193,6 +206,8 @@ class MainActivity : Activity() {
         refreshReceived()
         refreshSent()
         clearOutgoingCache()
+        // 上次没发出去的剪贴板文件已经没用了，待发送队列不跨启动保留
+        ClipboardCapture.cleanup(this)
         handleIncomingIntent(intent)
     }
 
@@ -219,6 +234,7 @@ class MainActivity : Activity() {
         }
         maybeAutoPresent()
         updateBatteryHint()
+        captureClipboardText()
     }
 
     override fun onPause() {
@@ -226,6 +242,13 @@ class MainActivity : Activity() {
         screenVisible = false
         // 选文件时 Activity 会 pause，但发现要继续跑：
         // 否则选完文件立刻发送时设备列表还没恢复，会误报“没有可用设备”。
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // 剪贴板只有在窗口拿到焦点时才读得到：onResume 早于焦点到达，
+        // 那时读回来是空的，所以焦点真正落到窗口上时再读一次。
+        if (hasFocus) captureClipboardText()
     }
 
     override fun onDestroy() {
@@ -400,6 +423,11 @@ class MainActivity : Activity() {
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
         pendingCard.addView(pendingTitle)
+        pendingHint = moonText(ui, "", 13f, c.textSecondary).apply {
+            gravity = Gravity.CENTER
+            visibility = View.GONE
+        }
+        pendingCard.addView(pendingHint)
         val pendingActions = LinearLayout(this).apply {
             orientation = if (stackActions) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -411,11 +439,7 @@ class MainActivity : Activity() {
         pendingActions.addView(pendingSendButton, if (stackActions) blockParams() else
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         pendingActions.addView(MoonButton(this, ui, MoonButton.Style.GHOST, MoonStrings.t("取消")).apply {
-            setOnClickListener {
-                pendingUris.clear()
-                autoPickerArmed = false
-                updatePendingUi()
-            }
+            setOnClickListener { clearPending() }
         }, if (stackActions) blockParams(top = 8) else LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ).apply { leftMargin = ui.dp(8) })
@@ -567,6 +591,14 @@ class MainActivity : Activity() {
             onCheckedChange = { GallerySettings.setEnabled(this@MainActivity, it) }
         }
         sheet.add(settingRow(MoonStrings.t("收到的照片自动存入相册"), autoSaveSwitch))
+        sheet.add(moonDivider(ui, 44))
+
+        clipboardSwitch = MoonSwitch(this, ui).apply {
+            setCheckedSilently(ClipboardSettings.isEnabled(this@MainActivity))
+            contentDescription = MoonStrings.t("自动捕获剪贴板文本")
+            onCheckedChange = { ClipboardSettings.setEnabled(this@MainActivity, it) }
+        }
+        sheet.add(settingRow(MoonStrings.t("自动捕获剪贴板文本"), clipboardSwitch))
         sheet.add(moonDivider(ui, 44))
 
         batteryValue = moonText(ui, MoonStrings.t("去设置"), MoonType.META, c.primaryStrong)
@@ -1015,6 +1047,89 @@ class MainActivity : Activity() {
         updatePendingUi()
     }
 
+    // MARK: - 剪贴板
+
+    /**
+     * 回到前台时捕获剪贴板文本：存成 txt，排进待发送队列。
+     * Android 10 起只有获得焦点的 App 能读剪贴板，所以只在有焦点时读。
+     */
+    private fun captureClipboardText() {
+        if (!ClipboardSettings.isEnabled(this)) return
+        when (val read = ClipboardCapture.read(this)) {
+            is ClipboardCapture.Read.Text -> queueClipboardText(read.text)
+            is ClipboardCapture.Read.Empty -> {
+                // 焦点可能还没真正落到窗口上，短暂重试几次
+                if (clipboardRetry < 3) {
+                    clipboardRetry++
+                    handler.postDelayed({ captureClipboardText() }, 400)
+                } else {
+                    clipboardRetry = 0
+                }
+            }
+            else -> clipboardRetry = 0
+        }
+    }
+
+    /** 存成 txt 并排进待发送队列；同一段文本不重复入队 */
+    private fun queueClipboardText(text: String) {
+        val fingerprint = ClipboardCapture.fingerprint(text)
+        if (clipboardEntries.any { it.fingerprint == fingerprint }) return
+        val last = ClipboardSettings.lastCapture(this)
+        if (last != null && last.first == fingerprint &&
+            System.currentTimeMillis() - last.second < ClipboardSettings.REPEAT_WINDOW_MS
+        ) {
+            return
+        }
+        // 写文件放到后台线程，别卡住主线程
+        thread(name = "macdrop-clipboard") {
+            val file = ClipboardCapture.writeTextFile(this, text, MoonStrings.t("剪贴板"))
+                ?: return@thread
+            val uri = Uri.fromFile(file)
+            runOnUiThread {
+                if (isFinishing || isDestroyed) {
+                    file.delete()
+                    return@runOnUiThread
+                }
+                clipboardEntries.add(ClipboardEntry(uri, fingerprint))
+                ClipboardSettings.rememberCapture(this, fingerprint)
+                if (!pendingUris.contains(uri)) pendingUris.add(uri)
+                pendingHintText = MoonStrings.t("剪贴板里的文本已存成 txt，请选择接收设备")
+                updatePendingUi()
+                com.macdrop.mobile.net.MobileLog.write(
+                    "已捕获剪贴板文本，待发送 ${pendingUris.size} 个"
+                )
+            }
+        }
+    }
+
+    /** 剪贴板文件发出去或被取消时删掉，别把临时文件留在磁盘上 */
+    private fun removeClipboardFiles(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        val targets = uris.map { it.toString() }.toHashSet()
+        val removed = clipboardEntries.filter { targets.contains(it.uri.toString()) }
+        if (removed.isEmpty()) return
+        for (entry in removed) {
+            try {
+                entry.uri.path?.let { File(it).delete() }
+            } catch (_: Exception) {
+            }
+        }
+        val removedPaths = removed.map { it.uri.toString() }.toHashSet()
+        clipboardEntries.removeAll { removedPaths.contains(it.uri.toString()) }
+        if (clipboardEntries.isEmpty()) pendingHintText = ""
+    }
+
+    /** 清空待发送队列，顺手删掉剪贴板生成的临时文件 */
+    private fun clearPending() {
+        removeClipboardFiles(pendingUris)
+        pendingUris.clear()
+        autoPickerArmed = false
+        pendingHintText = ""
+        // 取消就是不要了：同一段文本下次回到前台还能重新捕获
+        ClipboardSettings.forgetCapture(this)
+        updatePendingUi()
+    }
+
     // MARK: - 其他 App 分享 / 打开
 
     private fun handleIncomingIntent(intent: Intent?) {
@@ -1133,6 +1248,12 @@ class MainActivity : Activity() {
         pendingCard.visibility = if (showPending) View.VISIBLE else View.GONE
         nearfield.visibility = if (showPending || transferCard.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         pendingTitle.text = MoonStrings.f("待发送 · %d 个文件", pendingUris.size)
+        pendingHint.text = pendingHintText
+        pendingHint.visibility = if (showPending && pendingHintText.isNotEmpty()) {
+            View.VISIBLE
+        } else {
+            View.GONE
+        }
         pendingSendButton.isEnabled = mergedPeers().isNotEmpty() && !sending
     }
 
@@ -1571,6 +1692,14 @@ class MainActivity : Activity() {
     }
 
     private fun lengthOf(uri: Uri): Long {
+        // file:// 没有 ContentProvider，openAssetFileDescriptor 读不到长度
+        if (uri.scheme == "file") {
+            return try {
+                uri.path?.let { File(it).length() } ?: 0L
+            } catch (_: Exception) {
+                0L
+            }
+        }
         return try {
             contentResolver.openAssetFileDescriptor(uri, "r")?.use { descriptor ->
                 descriptor.length.coerceAtLeast(0)
@@ -1621,6 +1750,8 @@ class MainActivity : Activity() {
                                 peer.name,
                                 files.sumOf { file -> file.size }
                             )
+                            // 剪贴板生成的临时文件已经传完，删掉
+                            removeClipboardFiles(restoreUris)
                             refreshSent()
                             showResult(
                                 MoonStrings.f("已发送 %d 个文件到 %s", files.size, peer.name),

@@ -180,6 +180,12 @@ enum MoonStrings {
         "连接详情": "Connection",
         "存储位置与常见问题": "Storage & Help",
 
+        // MARK: 剪贴板
+        "自动捕获剪贴板文本": "Auto-Capture Clipboard Text",
+        "剪贴板": "Clipboard",
+        "剪贴板里的文本已存成 txt，请选择接收设备":
+            "Clipboard text saved as a .txt file. Choose a device to send to.",
+
         // MARK: 手动添加设备
         "对端地址": "Peer Address",
         "IP 地址": "IP Address",
