@@ -369,14 +369,13 @@ final class TransferEngine {
                 if round == 0 {
                     DispatchQueue.global().asyncAfter(deadline: .now() + 0.4) { attempt(0, round: 1) }
                 } else {
-                    let reason = (firstError.value ?? lastError.value ?? URLError(.badURL)).localizedDescription
-                    completion(.failure(NSError(domain: "MoonDrop", code: 1, userInfo: [
-                        NSLocalizedDescriptionKey: "\(reason)（对方可能在后台或已离线，请在对方屏幕上打开 MoonDrop）"
-                    ])))
+                    let raw = firstError.value ?? lastError.value ?? URLError(.badURL)
+                    completion(.failure(TransferEngine.makeError(raw)))
                 }
                 return
             }
             let base = bases[index]
+            Logger.write("尝试连接 \(base)")
             announceOnce(transferID: transferID, fileName: fileName,
                          relPath: relPath, total: total, rootName: rootName, baseURL: base) { result in
                 switch result {
@@ -391,6 +390,38 @@ final class TransferEngine {
             }
         }
         attempt(0, round: 0)
+    }
+
+    /// macOS 拒绝本地网络访问时，系统会把连接直接掐掉，
+    /// URLSession 报 -1009（看着像「断网」）。不认出来就会把原因说成「对方离线」，
+    /// 用户只会反复开关对端 App，方向完全错了。
+    static func isLocalNetworkBlocked(_ error: Error?) -> Bool {
+        guard let error else { return false }
+        let ns = error as NSError
+        if let path = ns.userInfo["NSURLErrorNWPathKey"] as? String,
+           path.contains("Local network prohibited") {
+            return true
+        }
+        if let underlying = ns.userInfo["NSUnderlyingError"] as? NSError,
+           let path = underlying.userInfo["NSURLErrorNWPathKey"] as? String,
+           path.contains("Local network prohibited") {
+            return true
+        }
+        return false
+    }
+
+    /// 把底层错误包装成带原因说明的错误；本地网络被拒时用专门的错误码，
+    /// 界面上据此弹「打开系统设置」，而不是显示一句误导人的话。
+    private static func makeError(_ raw: Error) -> Error {
+        if isLocalNetworkBlocked(raw) {
+            return NSError(domain: "MoonDrop", code: 1009, userInfo: [
+                NSLocalizedDescriptionKey: "系统未允许 MoonDrop 访问本地网络，请在「系统设置 → 隐私与安全性 → 本地网络」里打开 MoonDrop"
+            ])
+        }
+        let reason = raw.localizedDescription
+        return NSError(domain: "MoonDrop", code: 1, userInfo: [
+            NSLocalizedDescriptionKey: "\(reason)（对方可能在后台或已离线，请在对方屏幕上打开 MoonDrop）"
+        ])
     }
 
     /// IPv6 字面量拼进 URL 必须加方括号，否则 URL 非法（-1000）

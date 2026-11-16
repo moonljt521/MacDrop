@@ -406,6 +406,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let total = items.reduce(Int64(0)) { $0 + $1.size }
         Logger.write("发送到 \(peer.name)：\(items.count) 个文件，\(total) 字节")
+        Logger.write("目标地址 host=\(peer.host) port=\(peer.port) 备选=\(peer.alternatives.joined(separator: ","))")
 
         status.refreshPanelStatus()
         engine.send(items: items, to: peer,
@@ -424,13 +425,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case .failure(let err):
                     self.status.showResult("发送失败：\(err.localizedDescription)", isError: true)
                     Logger.write("发送失败：\(err)\(self.connectHint(for: err))")
+                    // 本地网络权限被拒时，弹窗直接把人送到系统设置，
+                    // 光在面板上写一句话会让人一直去折腾对端设备
+                    if (err as NSError).code == 1009 {
+                        self.showLocalNetworkAlert()
+                    }
                 }
             }
         })
     }
 
-    private func notifyReceived(_ url: URL) {
-        if cfg.current.autoAccept {
+    /// 系统没给本地网络权限时的提示：一键跳到对应的系统设置页
+    private func showLocalNetworkAlert() {
+        let alert = NSAlert()
+        alert.messageText = "系统还没允许 MoonDrop 访问本地网络"
+        alert.informativeText = "在「系统设置 → 隐私与安全性 → 本地网络」里打开 MoonDrop 的开关，才能把文件发到同一网络里的设备。"
+        alert.addButton(withTitle: "打开系统设置")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    private func notifyReceived(_ url: URL) {        if cfg.current.autoAccept {
             FinderBridge.reveal(url)
         }
     }

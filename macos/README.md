@@ -28,6 +28,7 @@ Permissions requested on first launch: **Local Network** (discovery and transfer
 | Symptom | Fix |
 |---|---|
 | No peers found | Same network, allow the firewall prompt, check System Settings → Privacy & Security → Local Network, or add the peer by IP |
+| Peers listed but sending fails | Usually the Local Network permission is denied: the system drops the connection and URLSession reports `NSURLError -1009` (looks like an offline network). Current builds show an alert with an **Open System Settings** button |
 | Port in use | The app offers a random port; peers are still found through Bonjour |
 | Cross-Mac drag not received | macOS broadcasts cross-machine drags over AWDL and third-party apps cannot initiate them — use **Send Finder Selection** instead |
 | “MoonDrop is damaged” | `xattr -cr /Applications/MoonDrop.app` |
