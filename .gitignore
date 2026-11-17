@@ -2,6 +2,8 @@
 
 # AI 工具的私有草稿目录，不属于产品仓库
 .workbuddy-ai/
+.workbuddy/
+.tmp/
 
 # macOS app
 .build/
