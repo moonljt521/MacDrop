@@ -1365,18 +1365,21 @@ class MainActivity : Activity() {
      * Wi-Fi 行：真实名称要「精确位置」权限才拿得到，
      * 所以没拿到名字时这一行可点，点了就按需申请权限。
      */
+    /** Wi-Fi 那一行显示什么：名字，或者缺哪一样权限 */
+    private fun wifiValueText(): String = when (WiFiName.status(this)) {
+        WiFiName.Status.OK -> WiFiName.current(this)
+        WiFiName.Status.NOT_ON_WIFI -> MoonStrings.t("未连接 Wi-Fi")
+        WiFiName.Status.NOT_ASKED -> MoonStrings.t("已连接 · 轻点显示名称")
+        // 说清楚缺哪一样权限，用户才知道要去哪儿点
+        WiFiName.Status.APPROXIMATE_LOCATION -> MoonStrings.t("已连接 · 需要精确位置")
+        WiFiName.Status.MISSING_NEARBY -> MoonStrings.t("已连接 · 需要附近设备权限")
+        WiFiName.Status.REDACTED -> MoonStrings.t("已连接 · 名称不可用")
+    }
+
     private fun wifiRow(): LinearLayout {
-        val name = WiFiName.current(this)
-        val onWifi = WiFiName.isOnWifi(this)
-        val granted = WiFiName.hasLocationPermission(this)
-        val valueText = when {
-            name.isNotEmpty() -> name
-            !onWifi -> MoonStrings.t("未连接 Wi-Fi")
-            // 授权了还拿不到名字（系统限制或选了「大致位置」），说清楚而不是让人反复点
-            granted -> MoonStrings.t("已连接 · 名称不可用")
-            locationRequested -> MoonStrings.t("已连接 · 轻点去设置")
-            else -> MoonStrings.t("已连接 · 轻点显示名称")
-        }
+        val status = WiFiName.status(this)
+        val name = if (status == WiFiName.Status.OK) WiFiName.current(this) else ""
+        val valueText = wifiValueText()
         val stacked = resources.configuration.fontScale >= 1.4f ||
             resources.configuration.screenWidthDp < 340
         val value = moonText(ui, valueText, 13f, ui.colors.textPrimary, ui.medium).apply {
@@ -1391,22 +1394,19 @@ class MainActivity : Activity() {
             addView(moonText(ui, MoonStrings.t("Wi-Fi"), 13f, ui.colors.textSecondary))
             addView(value, if (stacked) blockParams() else
                 LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            if (name.isEmpty() && onWifi) {
+            if (name.isEmpty() && status != WiFiName.Status.NOT_ON_WIFI) {
                 isClickable = true
                 isFocusable = true
                 background = moonRippleBackground(ui, ui.colors.textSecondary)
                 setOnClickListener {
-                    if (WiFiName.hasLocationPermission(this@MainActivity)) {
-                        toast(MoonStrings.t("仍无法读取 Wi-Fi 名称"))
-                    } else if (locationRequested) {
-                        // 拒绝过就不再弹窗了，直接把人送到应用设置页
-                        openAppSettings()
-                    } else {
+                    val missing = WiFiName.missingPermissions(this@MainActivity)
+                    if (missing.isNotEmpty()) {
                         locationRequested = true
-                        requestPermissions(
-                            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
-                            REQ_LOCATION
-                        )
+                        requestPermissions(missing, REQ_LOCATION)
+                    } else {
+                        // 权限都齐了还是读不到：把人送到应用权限页自己看
+                        toast(MoonStrings.t("仍无法读取 Wi-Fi 名称"))
+                        openAppSettings()
                     }
                 }
             }
@@ -1437,14 +1437,14 @@ class MainActivity : Activity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode != REQ_LOCATION) return
         wifiName = WiFiName.current(this)
+        // 授权结果可能变了：位置给了但「附近设备」没给，或反过来
+        wifiValueView?.text = wifiValueText()
         if (wifiName.isNotEmpty()) {
-            wifiValueView?.text = wifiName
             updatePeerCaption()
         } else {
             toast(MoonStrings.t("仍无法读取 Wi-Fi 名称"))
         }
     }
-
     /** 打开本应用的系统设置页 */
     private fun openAppSettings() {
         try {

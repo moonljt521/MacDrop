@@ -85,8 +85,8 @@ The ring uses measured progress only. It never animates on a timer or fills to a
 The network name answers the only question that matters when a peer is missing: are both devices on the same network?
 
 - It lives in the connection details sheet, as one more row about this device. The main screen mentions it only when no peer was found at all; with peers on screen the name adds nothing and the stage stays the focal point.
-- The name comes from the system, never from a guess. iOS needs the Access Wi-Fi Information capability plus precise-location authorization, Android needs the fine-location permission: both platforms treat the SSID as location data.
-- Permission is requested when the user taps that row, never at launch. Without it the row reads "Connected · tap to show the name"; after a refusal it points at Settings; when permission was granted but the system still withholds the name, it says so instead of pretending.
+- The name comes from the system, never from a guess. iOS needs the Access Wi-Fi Information capability plus precise-location authorization; Android needs the fine-location permission *and*, from Android 13 on, the nearby-devices permission: both platforms treat the SSID as location data, and several OEM builds redact the name unless every one of them is granted.
+- Permission is requested when the user taps that row, never at launch. Without it the row reads "Connected · tap to show the name"; after a refusal it points at Settings; when permission was granted but the system still withholds the name, it says which permission is missing instead of pretending.
 - The app never invents a name. If it cannot read one, it states that the device is connected and leaves it there.
 
 ## Clipboard Capture

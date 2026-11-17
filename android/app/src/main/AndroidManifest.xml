@@ -5,8 +5,11 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- 读取当前 Wi-Fi 名称（SSID）：系统把 SSID 当位置数据保护，
-         没有这个权限拿到的只会是 "<unknown ssid>" -->
+         没有这些权限拿到的只会是 "<unknown ssid>" -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- Android 13+ 以 API 33 为目标时，读 Wi-Fi 信息还要「附近的设备」权限；
+         不声明不给就拿不到 SSID。这里要显示名字，所以不用 neverForLocation -->
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />

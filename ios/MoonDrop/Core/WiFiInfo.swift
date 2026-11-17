@@ -48,23 +48,39 @@ final class WiFiInfo: NSObject, ObservableObject {
         access = Self.currentAccess(of: locationManager)
     }
 
-    /// 已经拿到名字了就不必再打扰用户；
-    /// 已授权但系统仍然不给名字（比如用户选了「大致位置」）时也不再重复请求
-    var canRequest: Bool { name.isEmpty && isOnWiFi && access != .granted }
+    /// 这一行还能不能点：没授权时可以去申请，已授权但只是「大致位置」时可以去设置里改；
+    /// 权限全齐却仍拿不到名字时不再让用户空点
+    var canRequest: Bool {
+        guard name.isEmpty, isOnWiFi else { return false }
+        return access != .granted || needsPreciseLocation
+    }
+
+    /// 只给了「大致位置」：系统同样不给 Wi-Fi 名字，得让用户改成「精确位置」
+    var needsPreciseLocation: Bool {
+        access == .granted && locationManager.accuracyAuthorization == .reducedAccuracy
+    }
 
     /// 用户点了「Wi-Fi」：有授权就读名字，没授权就按状态走
     func request() {
         switch access {
         case .granted:
-            fetchName()
+            if needsPreciseLocation {
+                // 大致位置读不到名字，只能去设置里改成精确位置
+                openSettings()
+            } else {
+                fetchName()
+            }
         case .notAsked:
             locationManager.requestWhenInUseAuthorization()
         case .denied, .restricted:
             // 已经拒绝过，系统不会再弹；直接把人送到设置页
-            if let url = URL(string: UIApplication.openSettingsURLString) {
-                UIApplication.shared.open(url)
-            }
+            openSettings()
         }
+    }
+
+    private func openSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 
     /// 回到前台时刷新一次：用户可能换网络了

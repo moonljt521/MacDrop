@@ -891,7 +891,9 @@ struct ConnectionSheet: View {
         switch model.wifi.access {
         case .granted:
             // 授权了但系统还是不给名字（多半是选了「大致位置」），说清楚而不是让人反复点
-            return moonT("已连接 · 名称不可用")
+            return model.wifi.needsPreciseLocation
+                ? moonT("已连接 · 需要精确位置")
+                : moonT("已连接 · 名称不可用")
         case .denied, .restricted:
             return moonT("已连接 · 轻点去设置")
         case .notAsked:

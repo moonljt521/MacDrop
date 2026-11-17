@@ -196,6 +196,7 @@ enum MoonStrings {
         "已连接 · 轻点显示名称": "Connected · tap to show the name",
         "已连接 · 轻点去设置": "Connected · tap to open settings",
         "已连接 · 名称不可用": "Connected · name unavailable",
+        "已连接 · 需要精确位置": "Connected · needs precise location",
         "当前 Wi-Fi：%@ · 打开另一台设备上的 MoonDrop":
             "Current Wi-Fi: %@ · Open MoonDrop on another device",
         "Wi-Fi，%@": "Wi-Fi, %@",
