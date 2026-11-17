@@ -67,6 +67,15 @@ object MoonStrings {
         "电脑" to "Computer",
         "%s，%s，%s:%d，点按发送文件" to
             "%s, %s, %s:%d, double tap to send",
+
+        // Wi-Fi
+        "已连接 · 轻点显示名称" to "Connected · tap to show the name",
+        "已连接 · 轻点去设置" to "Connected · tap to open settings",
+        "已连接 · 名称不可用" to "Connected · name unavailable",
+        "仍无法读取 Wi-Fi 名称" to "Still can't read the Wi-Fi name",
+        "无法打开系统设置" to "Couldn't open System Settings",
+        "当前 Wi-Fi：%s · 发现后即可发送" to
+            "Current Wi-Fi: %s · send as soon as a device appears",
         "后台接收" to "Background Receiving",
         "去设置" to "Open Settings",
         "已允许" to "Allowed",

@@ -59,6 +59,8 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>MoonDrop 需要在局域网内发现其他 Mac / iPhone / Android，并直接传输文件。</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>用于显示当前连接的 Wi-Fi 名称，方便你确认两台设备在同一个网络。不会记录或上传任何位置信息。</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>MoonDrop 需要写入相册，才能把收到的照片和视频保存下来。</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

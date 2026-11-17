@@ -228,9 +228,14 @@ struct ContentView: View {
         default:
             if model.scanning { return scanSubtitle }
             if !model.scanSummary.isEmpty { return model.scanSummary }
-            return model.peers.isEmpty
-                ? moonT("打开另一台设备上的 MoonDrop")
-                : moonTP("%d 台设备在附近，轻点开始传递", model.peers.count)
+            if model.peers.isEmpty {
+                // 一台设备都找不到时，Wi-Fi 名最有用：先确认两台设备在同一个网段
+                if !model.wifi.name.isEmpty {
+                    return moonTF("当前 Wi-Fi：%@ · 打开另一台设备上的 MoonDrop", model.wifi.name)
+                }
+                return moonT("打开另一台设备上的 MoonDrop")
+            }
+            return moonTP("%d 台设备在附近，轻点开始传递", model.peers.count)
         }
     }
 

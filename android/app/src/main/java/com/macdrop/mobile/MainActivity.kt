@@ -132,6 +132,12 @@ class MainActivity : Activity() {
     private var pendingHintText = ""
     /** 焦点还没落到窗口上时的重试次数 */
     private var clipboardRetry = 0
+    /** 当前 Wi-Fi 名称（需要精确位置权限才拿得到） */
+    private var wifiName = ""
+    /** 连接详情里的 Wi-Fi 名称，授权后原地刷新 */
+    private var wifiValueView: TextView? = null
+    /** 已经申请过位置权限没有（拒绝过就只送人去设置页） */
+    private var locationRequested = false
 
     // These views belong only to the currently presented history sheet.
     private var historySheet: MoonSheet? = null
@@ -236,6 +242,9 @@ class MainActivity : Activity() {
         maybeAutoPresent()
         updateBatteryHint()
         captureClipboardText()
+        // 用户可能换网络了，Wi-Fi 名字跟着更新
+        wifiName = WiFiName.current(this)
+        updatePeerCaption()
     }
 
     override fun onPause() {
@@ -984,7 +993,12 @@ class MainActivity : Activity() {
             } else {
                 MoonStrings.t("正在扫描 · 正在逐个探测局域网地址")
             }
-            count == 0 -> MoonStrings.t("0 台设备 · 发现后即可发送")
+            count == 0 -> if (wifiName.isNotEmpty()) {
+                // 一台设备都找不到时，Wi-Fi 名最有用：先确认两台设备在同一个网段
+                MoonStrings.f("当前 Wi-Fi：%s · 发现后即可发送", wifiName)
+            } else {
+                MoonStrings.t("0 台设备 · 发现后即可发送")
+            }
             else -> MoonStrings.f("%d 台设备，轻点即可发送", count)
         }
     }
@@ -1325,6 +1339,7 @@ class MainActivity : Activity() {
                 else -> MoonStrings.t("未确认")
             }
         ))
+        sheet.add(wifiRow())
         sheet.add(moonText(
             ui,
             networkSummary(port),
@@ -1346,6 +1361,58 @@ class MainActivity : Activity() {
         sheet.show()
     }
 
+        /**
+     * Wi-Fi 行：真实名称要「精确位置」权限才拿得到，
+     * 所以没拿到名字时这一行可点，点了就按需申请权限。
+     */
+    private fun wifiRow(): LinearLayout {
+        val name = WiFiName.current(this)
+        val onWifi = WiFiName.isOnWifi(this)
+        val granted = WiFiName.hasLocationPermission(this)
+        val valueText = when {
+            name.isNotEmpty() -> name
+            !onWifi -> MoonStrings.t("未连接 Wi-Fi")
+            // 授权了还拿不到名字（系统限制或选了「大致位置」），说清楚而不是让人反复点
+            granted -> MoonStrings.t("已连接 · 名称不可用")
+            locationRequested -> MoonStrings.t("已连接 · 轻点去设置")
+            else -> MoonStrings.t("已连接 · 轻点显示名称")
+        }
+        val stacked = resources.configuration.fontScale >= 1.4f ||
+            resources.configuration.screenWidthDp < 340
+        val value = moonText(ui, valueText, 13f, ui.colors.textPrimary, ui.medium).apply {
+            gravity = if (stacked) Gravity.START else Gravity.END
+            setPadding(if (stacked) 0 else ui.dp(12), if (stacked) ui.dp(4) else 0, 0, 0)
+        }
+        wifiValueView = value
+        return LinearLayout(this).apply {
+            orientation = if (stacked) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, ui.dp(8), ui.dp(8), ui.dp(8))
+            addView(moonText(ui, MoonStrings.t("Wi-Fi"), 13f, ui.colors.textSecondary))
+            addView(value, if (stacked) blockParams() else
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            if (name.isEmpty() && onWifi) {
+                isClickable = true
+                isFocusable = true
+                background = moonRippleBackground(ui, ui.colors.textSecondary)
+                setOnClickListener {
+                    if (WiFiName.hasLocationPermission(this@MainActivity)) {
+                        toast(MoonStrings.t("仍无法读取 Wi-Fi 名称"))
+                    } else if (locationRequested) {
+                        // 拒绝过就不再弹窗了，直接把人送到应用设置页
+                        openAppSettings()
+                    } else {
+                        locationRequested = true
+                        requestPermissions(
+                            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
+                            REQ_LOCATION
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     private fun infoRow(label: String, value: String): LinearLayout =
         LinearLayout(this).apply {
             val stacked = resources.configuration.fontScale >= 1.4f ||
@@ -1361,8 +1428,38 @@ class MainActivity : Activity() {
                 LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
 
-    private fun copyText(text: String) {
-        getSystemService(ClipboardManager::class.java)
+    /** 授权结果：拿到位置权限就能读到真实 Wi-Fi 名称了 */
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQ_LOCATION) return
+        wifiName = WiFiName.current(this)
+        if (wifiName.isNotEmpty()) {
+            wifiValueView?.text = wifiName
+            updatePeerCaption()
+        } else {
+            toast(MoonStrings.t("仍无法读取 Wi-Fi 名称"))
+        }
+    }
+
+    /** 打开本应用的系统设置页 */
+    private fun openAppSettings() {
+        try {
+            startActivity(
+                Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:$packageName")
+                )
+            )
+        } catch (_: Exception) {
+            toast(MoonStrings.t("无法打开系统设置"))
+        }
+    }
+
+    private fun copyText(text: String) {        getSystemService(ClipboardManager::class.java)
             ?.setPrimaryClip(ClipData.newPlainText("MoonDrop", text))
     }
 
@@ -2273,6 +2370,8 @@ class MainActivity : Activity() {
         private const val REQ_FILES = 1001
         private const val REQ_ALBUM = 1004
         private const val REQ_NOTIFICATIONS = 1003
+        /** 读取 Wi-Fi 名称需要的位置权限 */
+        private const val REQ_LOCATION = 1004
         private const val APK_MIME = "application/vnd.android.package-archive"
 
         /// 雷达动画的最短展示时长：快网络下扫描转瞬即逝，一闪而过等于没反馈

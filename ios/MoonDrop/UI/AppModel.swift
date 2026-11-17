@@ -30,6 +30,8 @@ final class AppModel: ObservableObject {
     let store: FileStore
     let server: TransferServer
     let browser: PeerBrowser
+    /// 当前 Wi-Fi 名称（需要用户授权才拿得到名字）
+    let wifi = WiFiInfo()
 
     private let client = TransferClient()
     private let defaults = UserDefaults.standard
@@ -190,6 +192,8 @@ final class AppModel: ObservableObject {
         // 每次回到前台都重新给一轮重试预算：上次没点「允许粘贴」，这次还有机会
         clipboardRetry = 0
         captureClipboard()
+        // 用户可能换网络了，Wi-Fi 名字跟着更新
+        wifi.refresh()
     }
 
     /// 从 moondrop://incoming 进来：取回文件后直接进入选设备流程。

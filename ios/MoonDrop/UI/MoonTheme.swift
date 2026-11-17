@@ -824,6 +824,7 @@ struct ConnectionSheet: View {
                                    value: model.listenPort > 0 ? String(model.listenPort) : moonT("启动中"))
                     LabeledContent(moonT("局域网地址"), value: addressText)
                     LabeledContent(moonT("广播状态"), value: advertiseText)
+                    wifiRow
                 }
 
                 Section {
@@ -859,6 +860,43 @@ struct ConnectionSheet: View {
     private var addressText: String {
         let addresses = model.localAddresses
         return addresses.isEmpty ? moonT("未连接 Wi-Fi") : addresses.joined(separator: ", ")
+    }
+
+    /// Wi-Fi 名称行：名字要用户授权才能拿到，所以没拿到时这一行是可点的
+    private var wifiRow: some View {
+        HStack {
+            Text(moonT("Wi-Fi"))
+            Spacer()
+            Button {
+                model.wifi.request()
+            } label: {
+                HStack(spacing: 4) {
+                    Text(wifiText)
+                    if model.wifi.canRequest {
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                    }
+                }
+                .foregroundStyle(model.wifi.canRequest ? MoonTheme.primary : MoonTheme.textSecondary)
+                .font(MoonType.body)
+            }
+            .disabled(!model.wifi.canRequest)
+            .accessibilityLabel(moonTF("Wi-Fi，%@", wifiText))
+        }
+    }
+
+    private var wifiText: String {
+        if !model.wifi.name.isEmpty { return model.wifi.name }
+        if !model.wifi.isOnWiFi { return moonT("未连接 Wi-Fi") }
+        switch model.wifi.access {
+        case .granted:
+            // 授权了但系统还是不给名字（多半是选了「大致位置」），说清楚而不是让人反复点
+            return moonT("已连接 · 名称不可用")
+        case .denied, .restricted:
+            return moonT("已连接 · 轻点去设置")
+        case .notAsked:
+            return moonT("已连接 · 轻点显示名称")
+        }
     }
 
     private var advertiseText: String {

@@ -6,5 +6,9 @@
 	<array>
 		<string>group.com.macdrop.mobile</string>
 	</array>
+	<!-- 读取当前 Wi-Fi 名称（SSID）：系统把 SSID 当位置数据保护，
+	     还需要用户授予精确位置授权，两者缺一都拿不到名字 -->
+	<key>com.apple.developer.networking.wifi-info</key>
+	<true/>
 </dict>
 </plist>

@@ -22,6 +22,7 @@ Native file transfer between **Mac, iPhone and Android** over the local network.
 - Receive on any platform, with progress on both ends
 - Open or share files from other apps (iOS: Open in / Share, Android: share sheet)
 - Entering the app turns clipboard text into a pending `.txt` file, ready to send (iOS / Android; switchable off in settings)
+- The connection details show the current Wi-Fi name, so a missing peer is explained at a glance (iOS / Android; reading the name needs location authorization)
 - Tap a received file to preview it with the system viewer; folders are browsable in-app on iOS
 - Received photos and videos are saved exactly once — no duplicate gallery entries (iOS and Android; Android's toggle chooses whether media goes straight into the MoonDrop album directory)
 - "Sent" and "Received" keep a log, each with a one-tap clear (clearing received deletes ordinary files; media already in the system photo library is kept)

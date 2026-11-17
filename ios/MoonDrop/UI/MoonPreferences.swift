@@ -192,6 +192,14 @@ enum MoonStrings {
         "电脑": "Computer",
         "%@ · %@": "%@ · %@",
 
+        // MARK: Wi-Fi
+        "已连接 · 轻点显示名称": "Connected · tap to show the name",
+        "已连接 · 轻点去设置": "Connected · tap to open settings",
+        "已连接 · 名称不可用": "Connected · name unavailable",
+        "当前 Wi-Fi：%@ · 打开另一台设备上的 MoonDrop":
+            "Current Wi-Fi: %@ · Open MoonDrop on another device",
+        "Wi-Fi，%@": "Wi-Fi, %@",
+
         // MARK: 手动添加设备
         "对端地址": "Peer Address",
         "IP 地址": "IP Address",

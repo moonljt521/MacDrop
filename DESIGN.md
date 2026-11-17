@@ -80,8 +80,16 @@ The same central slot switches in place, so two states never stack.
 
 The ring uses measured progress only. It never animates on a timer or fills to a guessed value.
 
-## Clipboard Capture
+## Wi-Fi Name
 
+The network name answers the only question that matters when a peer is missing: are both devices on the same network?
+
+- It lives in the connection details sheet, as one more row about this device. The main screen mentions it only when no peer was found at all; with peers on screen the name adds nothing and the stage stays the focal point.
+- The name comes from the system, never from a guess. iOS needs the Access Wi-Fi Information capability plus precise-location authorization, Android needs the fine-location permission: both platforms treat the SSID as location data.
+- Permission is requested when the user taps that row, never at launch. Without it the row reads "Connected · tap to show the name"; after a refusal it points at Settings; when permission was granted but the system still withholds the name, it says so instead of pretending.
+- The app never invents a name. If it cannot read one, it states that the device is connected and leaves it there.
+
+## Clipboard Capture
 Entering the app can turn the clipboard's plain text into a pending file.
 
 - The capture runs when the app comes to the foreground, and only plain text is taken; images and files on the clipboard are ignored.
