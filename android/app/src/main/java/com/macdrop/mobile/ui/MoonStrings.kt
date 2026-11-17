@@ -74,6 +74,7 @@ object MoonStrings {
         "已连接 · 名称不可用" to "Connected · name unavailable",
         "已连接 · 需要精确位置" to "Connected · needs precise location",
         "已连接 · 需要附近设备权限" to "Connected · needs Nearby devices permission",
+        "已连接 · 需开启系统定位" to "Connected · needs system location on",
         "仍无法读取 Wi-Fi 名称" to "Still can't read the Wi-Fi name",
         "无法打开系统设置" to "Couldn't open System Settings",
         "当前 Wi-Fi：%s · 发现后即可发送" to

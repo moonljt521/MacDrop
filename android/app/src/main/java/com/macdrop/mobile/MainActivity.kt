@@ -1365,14 +1365,16 @@ class MainActivity : Activity() {
      * Wi-Fi 行：真实名称要「精确位置」权限才拿得到，
      * 所以没拿到名字时这一行可点，点了就按需申请权限。
      */
-    /** Wi-Fi 那一行显示什么：名字，或者缺哪一样权限 */
+    /** Wi-Fi 那一行显示什么：名字，或者缺哪一样 */
     private fun wifiValueText(): String = when (WiFiName.status(this)) {
         WiFiName.Status.OK -> WiFiName.current(this)
         WiFiName.Status.NOT_ON_WIFI -> MoonStrings.t("未连接 Wi-Fi")
         WiFiName.Status.NOT_ASKED -> MoonStrings.t("已连接 · 轻点显示名称")
-        // 说清楚缺哪一样权限，用户才知道要去哪儿点
+        // 说清楚缺哪一样，用户才知道要去哪儿点
         WiFiName.Status.APPROXIMATE_LOCATION -> MoonStrings.t("已连接 · 需要精确位置")
         WiFiName.Status.MISSING_NEARBY -> MoonStrings.t("已连接 · 需要附近设备权限")
+        // 系统定位服务一关，SSID 一律被抹掉，权限再全也没用
+        WiFiName.Status.LOCATION_SERVICE_OFF -> MoonStrings.t("已连接 · 需开启系统定位")
         WiFiName.Status.REDACTED -> MoonStrings.t("已连接 · 名称不可用")
     }
 
@@ -1399,6 +1401,11 @@ class MainActivity : Activity() {
                 isFocusable = true
                 background = moonRippleBackground(ui, ui.colors.textSecondary)
                 setOnClickListener {
+                    if (WiFiName.status(this@MainActivity) == WiFiName.Status.LOCATION_SERVICE_OFF) {
+                        // 定位服务关着：把人送到定位总开关那页
+                        openLocationSettings()
+                        return@setOnClickListener
+                    }
                     val missing = WiFiName.missingPermissions(this@MainActivity)
                     if (missing.isNotEmpty()) {
                         locationRequested = true
@@ -1454,6 +1461,15 @@ class MainActivity : Activity() {
                     Uri.parse("package:$packageName")
                 )
             )
+        } catch (_: Exception) {
+            toast(MoonStrings.t("无法打开系统设置"))
+        }
+    }
+
+    /** 打开系统定位总开关页：定位服务关着时 Wi-Fi 名字读不到 */
+    private fun openLocationSettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
         } catch (_: Exception) {
             toast(MoonStrings.t("无法打开系统设置"))
         }
