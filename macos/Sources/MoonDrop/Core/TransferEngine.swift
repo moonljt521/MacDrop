@@ -125,6 +125,7 @@ final class TransferEngine {
             "http://\(Self.formatHost($0)):\(peer.port)"
         }
         let total = items.reduce(Int64(0)) { $0 + $1.size }
+        let batchID = UUID().uuidString
         let tracker = SendProgressTracker()
 
         var initial = TransferProgress()
@@ -160,7 +161,8 @@ final class TransferEngine {
                 : nil
 
             announce(bases: bases, transferID: transferID, fileName: item.url.lastPathComponent,
-                     relPath: item.relativePath, total: item.size, rootName: rootName) { result in
+                     relPath: item.relativePath, total: item.size, rootName: rootName,
+                     batchID: batchID, fileCount: items.count, batchBytes: total) { result in
                 switch result {
                 case .failure(let error):
                     NSLog("[MoonDrop] 发送失败 \(item.url.lastPathComponent): \(error)")
@@ -357,7 +359,7 @@ final class TransferEngine {
     /// 依次尝试各地址；全部失败再整体重试一轮
     /// （对端刚被唤醒时，第一次连接常被直接丢弃）
     private func announce(bases: [String], transferID: String, fileName: String, relPath: String,
-                          total: Int64, rootName: String?,
+                          total: Int64, rootName: String?, batchID: String, fileCount: Int, batchBytes: Int64,
                           completion: @escaping (Result<String, Error>) -> Void) {
         let lastError = ErrorBox()
         // 首选地址（通常是可路由的 IPv4）的错误更有诊断价值；
@@ -377,10 +379,18 @@ final class TransferEngine {
             let base = bases[index]
             Logger.write("尝试连接 \(base)")
             announceOnce(transferID: transferID, fileName: fileName,
-                         relPath: relPath, total: total, rootName: rootName, baseURL: base) { result in
+                         relPath: relPath, total: total, rootName: rootName, batchID: batchID,
+                         fileCount: fileCount, batchBytes: batchBytes, baseURL: base) { result in
                 switch result {
-                case .success:
-                    completion(.success(base))
+                case .success(let accepted):
+                    if accepted {
+                        completion(.success(base))
+                    } else {
+                        self.awaitAcceptance(transferID: transferID, fileName: fileName, relPath: relPath,
+                                             total: total, rootName: rootName, batchID: batchID,
+                                             fileCount: fileCount, batchBytes: batchBytes, baseURL: base,
+                                             deadline: Date().addingTimeInterval(120), completion: completion)
+                    }
                 case .failure(let error):
                     NSLog("[MoonDrop] 连接失败 \(base): \(error)")
                     if firstError.value == nil { firstError.set(error) }
@@ -390,6 +400,37 @@ final class TransferEngine {
             }
         }
         attempt(0, round: 0)
+    }
+
+    private func awaitAcceptance(transferID: String, fileName: String, relPath: String,
+                                 total: Int64, rootName: String?, batchID: String, fileCount: Int,
+                                 batchBytes: Int64, baseURL: String, deadline: Date,
+                                 completion: @escaping (Result<String, Error>) -> Void) {
+        guard Date() < deadline else {
+            completion(.failure(NSError(domain: "MoonDrop", code: 408, userInfo: [
+                NSLocalizedDescriptionKey: "等待对方确认接收超时"
+            ])))
+            return
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
+            self.announceOnce(transferID: transferID, fileName: fileName, relPath: relPath,
+                              total: total, rootName: rootName, batchID: batchID, fileCount: fileCount,
+                              batchBytes: batchBytes, baseURL: baseURL) { result in
+                switch result {
+                case .success(let accepted):
+                    if accepted {
+                        completion(.success(baseURL))
+                    } else {
+                        self.awaitAcceptance(transferID: transferID, fileName: fileName, relPath: relPath,
+                                             total: total, rootName: rootName, batchID: batchID,
+                                             fileCount: fileCount, batchBytes: batchBytes, baseURL: baseURL,
+                                             deadline: deadline, completion: completion)
+                    }
+                case .failure(let error):
+                    completion(.failure(error))
+                }
+            }
+        }
     }
 
     /// macOS 拒绝本地网络访问时，系统会把连接直接掐掉，
@@ -430,28 +471,40 @@ final class TransferEngine {
     }
 
     private func announceOnce(transferID: String, fileName: String, relPath: String,
-                              total: Int64, rootName: String?, baseURL: String,
-                              completion: @escaping (Result<Void, Error>) -> Void) {
+                              total: Int64, rootName: String?, batchID: String, fileCount: Int,
+                              batchBytes: Int64, baseURL: String,
+                              completion: @escaping (Result<Bool, Error>) -> Void) {
         var comps = URLComponents()
         comps.queryItems = [
             .init(name: "name", value: fileName),
             .init(name: "path", value: relPath),
             .init(name: "size", value: String(total)),
-            .init(name: "root", value: rootName ?? "")
+            .init(name: "root", value: rootName ?? ""),
+            .init(name: "batch", value: batchID),
+            .init(name: "from", value: Config.shared.deviceName),
+            .init(name: "files", value: String(fileCount)),
+            .init(name: "bytes", value: String(batchBytes))
         ]
         guard let url = URL(string: "\(baseURL)/macdrop/begin?id=\(transferID)&\(comps.percentEncodedQuery ?? "")") else {
             completion(.failure(URLError(.badURL))); return
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        // 对端 App 挂起时不会回包，短超时才能快速失败并换地址/重试
         req.timeoutInterval = 4
-        URLSession.shared.dataTask(with: req) { _, resp, err in
+        URLSession.shared.dataTask(with: req) { data, resp, err in
             if let err { return completion(.failure(err)) }
-            guard let code = (resp as? HTTPURLResponse)?.statusCode, (200..<300).contains(code) else {
+            guard let code = (resp as? HTTPURLResponse)?.statusCode else {
                 return completion(.failure(URLError(.badServerResponse)))
             }
-            completion(.success(()))
+            if code == 200 { return completion(.success(true)) }
+            if code == 202 { return completion(.success(false)) }
+            if code == 403 {
+                let text = data.flatMap { String(data: $0, encoding: .utf8) } ?? "对方已拒绝接收"
+                return completion(.failure(NSError(domain: "MoonDrop", code: 403, userInfo: [
+                    NSLocalizedDescriptionKey: text
+                ])))
+            }
+            completion(.failure(URLError(.badServerResponse)))
         }.resume()
     }
 

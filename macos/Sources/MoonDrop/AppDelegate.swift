@@ -15,6 +15,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var total: Int64
     }
 
+    private struct PendingBegin {
+        var id: String
+        var meta: ReceiveMeta
+        var batchID: String
+    }
+
+    private struct Confirmation {
+        var batchID: String
+        var senderName: String
+        var fileCount: Int
+        var totalBytes: Int64
+        var firstName: String
+    }
+
+    private struct Batch {
+        var confirmation: Confirmation
+        var accepted: Bool?
+        var touched: Date
+    }
+
     /// HTTP 服务是并发线程，路由里对以下状态都必须加锁
     private let stateLock = NSLock()
     private var pendingMeta: [String: ReceiveMeta] = [:]
@@ -26,6 +46,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastRecvPercent: [String: Int] = [:]
     /// 最后一次收到数据的时间，看门狗靠它判定断流
     private var lastActivity: [String: Date] = [:]
+    private var pendingBegins: [String: PendingBegin] = [:]
+    private var batches: [String: Batch] = [:]
+    private var confirmationQueue: [Confirmation] = []
+    private var showingConfirmation = false
     private var watchdog: DispatchSourceTimer?
 
     /// 发送端进程被系统回收（典型：iOS 分享扩展）后，TCP 可能悄悄断掉、
@@ -164,11 +188,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             lastRecvPercent.removeValue(forKey: id)
             lastActivity.removeValue(forKey: id)
         }
+        let confirmDeadline = Date().addingTimeInterval(-120)
+        let expired = batches.filter { $0.value.accepted == nil && $0.value.touched < confirmDeadline }.map { $0.key }
+        for batchID in expired {
+            batches[batchID]?.accepted = false
+            batches[batchID]?.touched = Date()
+            pendingBegins = pendingBegins.filter { $0.value.batchID != batchID }
+        }
+        batches = batches.filter { $0.value.accepted == nil || Date().timeIntervalSince($0.value.touched) < 600 }
         stateLock.unlock()
 
         for victim in victims {
             endReceive(victim.id, meta: victim.meta, received: victim.done,
                        reason: "超过 \(Int(Self.receiveIdleTimeout)) 秒没有新分块")
+        }
+        if !expired.isEmpty {
+            DispatchQueue.main.async {
+                self.confirmationQueue.removeAll { expired.contains($0.batchID) }
+                self.showingConfirmation = false
+                self.presentNextConfirmation()
+            }
         }
     }
 
@@ -182,9 +221,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let name = meta?.name ?? id
         Logger.write("接收中断 \(name)：已收 \(received)/\(total) 字节（\(percent)%），\(reason)")
 
-        DispatchQueue.main.async { [weak self] in
-            self?.status.showResult("接收中断（已收 \(percent)%）", isError: true)
+        DispatchQueue.main.async {
+            self.showReceiveResult("接收中断（已收 \(percent)%）", isError: true)
         }
+    }
+
+    private func refreshReceivePanel() {
+        stateLock.lock()
+        let received = receivedBytes.values.reduce(Int64(0), +)
+        let total = pendingMeta.values.reduce(Int64(0)) { $0 + $1.total }
+        let active = !pendingMeta.isEmpty
+        stateLock.unlock()
+        if active { status.showReceiveProgress(total > 0 ? Double(received) / Double(total) : 0) }
+    }
+
+    private func showReceiveResult(_ text: String, isError: Bool = false) {
+        stateLock.lock()
+        let active = !pendingMeta.isEmpty
+        stateLock.unlock()
+        if active { refreshReceivePanel() } else { status.showResult(text, isError: isError) }
     }
 
     // MARK: - 新版接管旧实例
@@ -273,6 +328,130 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func beginReceive(_ req: HTTPService.Request) -> HTTPService.Response {
+        guard let id = req.query["id"], let name = req.query["name"],
+              let sizeText = req.query["size"], let size = Int64(sizeText) else {
+            return .failure("缺少参数")
+        }
+        guard size >= 0 else { return .failure("文件大小无效") }
+        let batchID = req.query["batch"].flatMap { $0.isEmpty ? nil : $0 } ?? id
+        let meta = ReceiveMeta(name: name, path: req.query["path"] ?? "", root: req.query["root"] ?? "", total: size)
+        let item = PendingBegin(id: id, meta: meta, batchID: batchID)
+        let confirmation = Confirmation(
+            batchID: batchID,
+            senderName: req.query["from"].flatMap { $0.isEmpty ? nil : $0 } ?? "局域网设备",
+            fileCount: min(10_000, max(1, Int(req.query["files"] ?? "") ?? 1)),
+            totalBytes: max(0, Int64(req.query["bytes"] ?? "") ?? size),
+            firstName: name
+        )
+
+        stateLock.lock()
+        if pendingMeta[id] != nil {
+            stateLock.unlock()
+            return .json(["ok": true])
+        }
+        if let batch = batches[batchID], batch.accepted == false {
+            stateLock.unlock()
+            return .failure("对方已拒绝接收", status: 403)
+        }
+        if batches[batchID] == nil {
+            guard pendingBegins.count < 8 else {
+                stateLock.unlock()
+                return .failure("等待确认的传输过多", status: 429)
+            }
+            batches[batchID] = Batch(confirmation: confirmation, accepted: nil, touched: Date())
+            pendingBegins[id] = item
+            stateLock.unlock()
+            DispatchQueue.main.async { self.enqueueConfirmation(confirmation) }
+            return pendingConfirmationResponse()
+        }
+        if batches[batchID]?.accepted == nil {
+            pendingBegins[id] = item
+            stateLock.unlock()
+            return pendingConfirmationResponse()
+        }
+        let response = createReceiveLocked(item)
+        stateLock.unlock()
+        return response
+    }
+
+    private func createReceiveLocked(_ item: PendingBegin) -> HTTPService.Response {
+        guard pendingMeta.count < 8 else { return .failure("同时接收的文件过多", status: 429) }
+        let values = try? Config.stagingDir.resourceValues(forKeys: [.volumeAvailableCapacityKey])
+        if let available = values?.volumeAvailableCapacity, item.meta.total > Int64(available) {
+            return .failure("接收设备剩余空间不足", status: 507)
+        }
+        do {
+            try engine.beginReceive(transferID: item.id, fileName: item.meta.name, total: item.meta.total)
+            let wasEmpty = pendingMeta.isEmpty
+            pendingMeta[item.id] = item.meta
+            receivedBytes[item.id] = 0
+            receivedOffsets[item.id] = []
+            lastRecvPercent[item.id] = -1
+            lastActivity[item.id] = Date()
+            pendingBegins.removeValue(forKey: item.id)
+            Logger.write("开始接收 \(item.meta.name)（\(item.meta.total) 字节）")
+            if wasEmpty {
+                DispatchQueue.main.async { self.status.beginReceive() }
+            }
+            return .json(["ok": true])
+        } catch {
+            return .failure(error.localizedDescription, status: 500)
+        }
+    }
+
+    private func pendingConfirmationResponse() -> HTTPService.Response {
+        .text("{\"confirmation\":true}", status: 202)
+    }
+
+    private func enqueueConfirmation(_ confirmation: Confirmation) {
+        guard !confirmationQueue.contains(where: { $0.batchID == confirmation.batchID }) else { return }
+        confirmationQueue.append(confirmation)
+        let environment = ProcessInfo.processInfo.environment
+        if environment["MACDROP_AUTO_ACCEPT"] == "1" || environment["MACDROP_AUTO_REJECT"] == "1" {
+            let accepted = environment["MACDROP_AUTO_ACCEPT"] == "1"
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) {
+                self.resolveBatch(batchID: confirmation.batchID, accepted: accepted)
+                DispatchQueue.main.async {
+                    self.confirmationQueue.removeAll { $0.batchID == confirmation.batchID }
+                    self.presentNextConfirmation()
+                }
+            }
+            return
+        }
+        presentNextConfirmation()
+    }
+
+    private func presentNextConfirmation() {
+        guard !showingConfirmation, let confirmation = confirmationQueue.first else { return }
+        showingConfirmation = true
+        let size = ByteCountFormatter.string(fromByteCount: confirmation.totalBytes, countStyle: .file)
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "\(confirmation.senderName) 请求发送文件"
+        alert.informativeText = confirmation.fileCount > 1
+            ? "\(confirmation.fileCount) 个文件，共 \(size)\n首个文件：\(confirmation.firstName)"
+            : "\(confirmation.firstName)\n\(size)"
+        alert.addButton(withTitle: "接收")
+        alert.addButton(withTitle: "拒绝")
+        NSApp.activate(ignoringOtherApps: true)
+        let accepted = alert.runModal() == .alertFirstButtonReturn
+        resolveBatch(batchID: confirmation.batchID, accepted: accepted)
+        confirmationQueue.removeFirst()
+        showingConfirmation = false
+        presentNextConfirmation()
+    }
+
+    private func resolveBatch(batchID: String, accepted: Bool) {
+        stateLock.lock()
+        if var batch = batches[batchID] {
+            batch.accepted = accepted
+            batch.touched = Date()
+            batches[batchID] = batch
+        }
+        stateLock.unlock()
+    }
+
     private func route(_ req: HTTPService.Request) -> HTTPService.Response {
         switch (req.method, req.path) {
 
@@ -282,32 +461,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                           "type": PeerKind.mac])
 
         case ("POST", "/macdrop/begin"):
-            guard let id = req.query["id"],
-                  let name = req.query["name"],
-                  let sizeStr = req.query["size"],
-                  let size = Int64(sizeStr) else {
-                return .failure("缺少参数")
-            }
-            do {
-                try engine.beginReceive(transferID: id, fileName: name, total: size)
-                stateLock.lock()
-                pendingMeta[id] = ReceiveMeta(name: name,
-                                              path: req.query["path"] ?? "",
-                                              root: req.query["root"] ?? "",
-                                              total: size)
-                receivedBytes[id] = 0
-                receivedOffsets[id] = []
-                lastRecvPercent[id] = -1
-                lastActivity[id] = Date()
-                stateLock.unlock()
-                Logger.write("开始接收 \(name)（\(size) 字节）")
-                DispatchQueue.main.async { [weak self] in
-                    self?.status.beginReceive()
-                }
-                return .json(["ok": true])
-            } catch {
-                return .failure(error.localizedDescription, status: 500)
-            }
+            return beginReceive(req)
 
         case ("POST", "/macdrop/chunk"):
             guard let id = req.query["id"],
@@ -315,26 +469,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   let offset = Int64(offStr) else {
                 return .failure("缺少参数")
             }
+            stateLock.lock()
+            guard let total = pendingMeta[id]?.total else {
+                stateLock.unlock()
+                return .failure("未知传输 ID", status: 404)
+            }
+            let chunkSize: Int64 = 2 * 1024 * 1024
+            guard offset >= 0, offset % chunkSize == 0, offset < total else {
+                stateLock.unlock()
+                return .failure("分块偏移越界")
+            }
+            let expected = min(Int64(chunkSize), total - offset)
+            guard Int64(req.body.count) == expected else {
+                stateLock.unlock()
+                return .failure("分块大小不符")
+            }
+            stateLock.unlock()
             do {
                 try engine.appendChunk(transferID: id, offset: offset, data: req.body)
                 stateLock.lock()
-                let total = pendingMeta[id]?.total ?? 0
-                // 重试会重发同一个 offset，只计一次
                 let isNewOffset = receivedOffsets[id, default: []].insert(offset).inserted
-                if isNewOffset {
-                    receivedBytes[id] = (receivedBytes[id] ?? 0) + Int64(req.body.count)
-                }
+                if isNewOffset { receivedBytes[id] = (receivedBytes[id] ?? 0) + Int64(req.body.count) }
                 let done = receivedBytes[id] ?? 0
                 lastActivity[id] = Date()
                 let percent = total > 0 ? Int(min(100, done * 100 / total)) : 0
                 let changed = percent != lastRecvPercent[id]
                 if changed { lastRecvPercent[id] = percent }
                 stateLock.unlock()
-                if changed {
-                    DispatchQueue.main.async { [weak self] in
-                        self?.status.showReceiveProgress(Double(percent) / 100)
-                    }
-                }
+                if changed { DispatchQueue.main.async { self.refreshReceivePanel() } }
                 return .json(["ok": true])
             } catch {
                 return .failure(error.localizedDescription, status: 500)
@@ -344,11 +506,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let id = req.query["id"] else { return .failure("缺少参数") }
             stateLock.lock()
             let meta = pendingMeta.removeValue(forKey: id)
+            let complete = meta != nil && receivedBytes[id] == meta?.total
             receivedBytes.removeValue(forKey: id)
             receivedOffsets.removeValue(forKey: id)
             lastRecvPercent.removeValue(forKey: id)
             lastActivity.removeValue(forKey: id)
             stateLock.unlock()
+            guard complete else {
+                engine.cancelReceive(transferID: id)
+                DispatchQueue.main.async { self.showReceiveResult("接收失败：文件不完整", isError: true) }
+                return .failure("文件不完整", status: 500)
+            }
             do {
                 let dest = try engine.finishReceive(transferID: id,
                                                     fileName: meta?.name ?? id,
@@ -356,16 +524,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                     rootName: meta?.root,
                                                     expectedSize: meta?.total)
                 Logger.write("接收完成 → \(dest.path)")
-                DispatchQueue.main.async { [weak self] in
-                    self?.status.showResult("已接收：\(dest.lastPathComponent)")
-                    self?.status.onReceived?(dest)
+                DispatchQueue.main.async {
+                    self.showReceiveResult("已接收：\(dest.lastPathComponent)")
+                    self.status.onReceived?(dest)
                 }
                 return .json(["ok": true, "path": dest.path])
             } catch {
                 engine.cancelReceive(transferID: id)
-                DispatchQueue.main.async { [weak self] in
-                    self?.status.showResult("接收失败", isError: true)
-                }
+                DispatchQueue.main.async { self.showReceiveResult("接收失败", isError: true) }
                 return .failure(error.localizedDescription, status: 500)
             }
 
@@ -390,6 +556,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 lastRecvPercent.removeValue(forKey: id)
                 lastActivity.removeValue(forKey: id)
                 stateLock.unlock()
+                DispatchQueue.main.async { self.showReceiveResult("发送方已取消接收", isError: true) }
             }
             return .json(["ok": true])
 
