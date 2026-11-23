@@ -86,10 +86,10 @@ class MediaStoreStore(context: Context) {
     private val appContext = context.applicationContext
     private val resolver = appContext.contentResolver
 
-    val stagingDir: File = File(appContext.cacheDir, "staging").apply {
-        mkdirs()
-        // 清掉上次异常退出留下的半截文件
-        listFiles()?.forEach { it.delete() }
+    val stagingDir: File = File(appContext.cacheDir, "staging").apply { mkdirs() }
+
+    fun cleanupStaging() {
+        stagingDir.listFiles()?.forEach { it.deleteRecursively() }
     }
 
     private fun collections(): List<Pair<Uri, String>> = listOf(

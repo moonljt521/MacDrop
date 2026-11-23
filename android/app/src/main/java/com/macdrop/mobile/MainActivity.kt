@@ -41,7 +41,6 @@ import com.macdrop.mobile.net.Peer
 import com.macdrop.mobile.net.PeerKind
 import com.macdrop.mobile.net.ReceiverRuntime
 import com.macdrop.mobile.net.SubnetScan
-import com.macdrop.mobile.net.TransferClient
 import com.macdrop.mobile.store.ClipboardCapture
 import com.macdrop.mobile.store.ClipboardEntry
 import com.macdrop.mobile.store.ClipboardSettings
@@ -182,13 +181,15 @@ class MainActivity : Activity() {
     private var autoPickerArmed = false
     private var chooserVisible = false
 
-    private val client = TransferClient()
     private val store by lazy { MediaStoreStore(this) }
     private val handler = Handler(Looper.getMainLooper())
     private val runtimeListener: () -> Unit = {
         refreshRuntime()
         refreshTransferUi()
     }
+    private val sendRuntimeListener: () -> Unit = { syncSendRuntime() }
+    private var confirmationDialog: AlertDialog? = null
+    private var confirmationBatch: String? = null
 
     override fun attachBaseContext(newBase: Context) {
         // 语言/外观必须在 Activity 挂上 base 之前生效，资源和主题才会跟着换
@@ -212,7 +213,8 @@ class MainActivity : Activity() {
         refreshRuntime()
         refreshReceived()
         refreshSent()
-        clearOutgoingCache()
+        if (!SendRuntime.sending) clearOutgoingCache()
+        syncSendRuntime()
         // 上次没发出去的剪贴板文件已经没用了，待发送队列不跨启动保留
         ClipboardCapture.cleanup(this)
         handleIncomingIntent(intent)
@@ -227,6 +229,8 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         screenVisible = true
+        SendRuntime.addListener(sendRuntimeListener)
+        syncSendRuntime()
         if (ReceiverRuntime.port > 0) startDiscovery(ReceiverRuntime.port)
         refreshRuntime()
         refreshReceived()
@@ -248,6 +252,8 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        SendRuntime.removeListener(sendRuntimeListener)
+        confirmationDialog?.dismiss()
         super.onPause()
         screenVisible = false
         // 选文件时 Activity 会 pause，但发现要继续跑：
@@ -263,6 +269,8 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         ReceiverRuntime.removeListener(runtimeListener)
+        SendRuntime.removeListener(sendRuntimeListener)
+        confirmationDialog?.dismiss()
         historySheet?.dismiss()
         stopDiscovery()
         super.onDestroy()
@@ -738,6 +746,45 @@ class MainActivity : Activity() {
             refreshReceived()
         }
         refreshTransferUi()
+        showNextReceiveConfirmation()
+    }
+
+    private fun showNextReceiveConfirmation() {
+        if (!screenVisible || isFinishing || isDestroyed) return
+        val pending = ReceiverRuntime.pendingConfirmations
+        val visibleBatch = confirmationBatch
+        if (confirmationDialog?.isShowing == true && visibleBatch != null) {
+            if (pending.any { it.batchID == visibleBatch }) return
+            confirmationDialog?.dismiss()
+        }
+        val next = pending.firstOrNull() ?: return
+        confirmationBatch = next.batchID
+        val size = android.text.format.Formatter.formatFileSize(this, next.totalBytes)
+        val detail = if (next.fileCount > 1) {
+            MoonStrings.f("%d 个文件，共 %s\n首个文件：%s", next.fileCount, size, next.firstName)
+        } else {
+            MoonStrings.f("%s\n%s", next.firstName, size)
+        }
+        confirmationDialog = AlertDialog.Builder(this)
+            .setTitle(MoonStrings.f("%s 请求发送文件", next.senderName))
+            .setMessage(detail)
+            .setPositiveButton(MoonStrings.t("接收")) { _, _ ->
+                resolveReceiveConfirmation(next.batchID, true)
+            }
+            .setNegativeButton(MoonStrings.t("拒绝")) { _, _ ->
+                resolveReceiveConfirmation(next.batchID, false)
+            }
+            .setCancelable(false)
+            .show()
+        confirmationDialog?.setOnDismissListener {
+            confirmationDialog = null
+            confirmationBatch = null
+        }
+    }
+
+    private fun resolveReceiveConfirmation(batchID: String, accepted: Boolean) {
+        val action = if (accepted) ReceiverService.ACTION_CONFIRM_ACCEPT else ReceiverService.ACTION_CONFIRM_REJECT
+        startService(Intent(this, ReceiverService::class.java).setAction(action).putExtra(ReceiverService.EXTRA_BATCH_ID, batchID))
     }
 
     private fun hasReceivedPrefix(message: String): Boolean = listOf(
@@ -1641,6 +1688,7 @@ class MainActivity : Activity() {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
             putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
         }
         startActivityForResult(intent, REQ_ALBUM)
     }
@@ -1838,72 +1886,48 @@ class MainActivity : Activity() {
         peer: Peer,
         restoreUris: List<Uri> = emptyList()
     ) {
-        if (sending) return
-
-        sending = true
-        sendingProgress = 0.0
-        sendingName = files.firstOrNull()?.name.orEmpty()
-        sendingLargeFile = files.sumOf { it.size } > 100L * 1024L * 1024L
+        if (SendRuntime.sending) return
         displayResult = ""
         resultToken++
-        refreshTransferUi()
+        SendRuntime.start(this, files, peer, restoreUris)
+        syncSendRuntime()
+    }
 
-        client.send(
-            files = files,
-            peer = peer,
-            resolver = contentResolver,
-            cacheDir = cacheDir,
-            onProgress = { sent, total, name ->
-                runOnUiThread {
-                    // 并发时回调可能乱序到达，进度只增不减
-                    val fraction = if (total > 0) sent.toDouble() / total else 0.0
-                    sendingProgress = maxOf(sendingProgress, fraction)
-                    sendingName = name
-                    refreshTransferUi()
-                }
+    private fun syncSendRuntime() {
+        sending = SendRuntime.sending
+        sendingProgress = SendRuntime.progress
+        sendingName = SendRuntime.currentName
+        sendingLargeFile = SendRuntime.largeFile
+        refreshTransferUi()
+        updatePendingUi()
+
+        val completion = SendRuntime.consumeCompletion() ?: return
+        completion.result.fold(
+            onSuccess = {
+                removeClipboardFiles(completion.restoreUris)
+                refreshSent()
+                showResult(
+                    MoonStrings.f("已发送 %d 个文件到 %s", completion.files.size, completion.peer.name),
+                    error = false,
+                    title = MoonStrings.t("发送完成")
+                )
             },
-            onComplete = { result ->
-                runOnUiThread {
-                    sending = false
-                    sendingProgress = 0.0
-                    result.fold(
-                        onSuccess = {
-                            SentStore.add(
-                                this,
-                                files.map { file -> file.name },
-                                peer.name,
-                                files.sumOf { file -> file.size }
-                            )
-                            // 剪贴板生成的临时文件已经传完，删掉
-                            removeClipboardFiles(restoreUris)
-                            refreshSent()
-                            showResult(
-                                MoonStrings.f("已发送 %d 个文件到 %s", files.size, peer.name),
-                                error = false,
-                                title = MoonStrings.t("发送完成")
-                            )
-                        },
-                        onFailure = {
-                            com.macdrop.mobile.net.MobileLog.write("发送失败：${it.message}")
-                            // 失败时把待发送的文件放回去，用户可以直接重试
-                            if (restoreUris.isNotEmpty()) {
-                                val known = pendingUris.map { uri -> uri.toString() }.toHashSet()
-                                val restored = restoreUris.filter { known.add(it.toString()) }
-                                pendingUris.addAll(0, restored)
-                                updatePendingUi()
-                            }
-                            showResult(
-                                MoonStrings.f("发送失败：%s", it.message),
-                                error = true,
-                                title = MoonStrings.t("发送失败")
-                            )
-                        }
-                    )
-                    clearOutgoingCache()
-                    handler.post { maybeAutoPresent() }
+            onFailure = {
+                com.macdrop.mobile.net.MobileLog.write("发送失败：${it.message}")
+                if (completion.restoreUris.isNotEmpty()) {
+                    val known = pendingUris.map { uri -> uri.toString() }.toHashSet()
+                    val restored = completion.restoreUris.filter { uri -> known.add(uri.toString()) }
+                    pendingUris.addAll(0, restored)
+                    updatePendingUi()
                 }
+                showResult(
+                    MoonStrings.f("发送失败：%s", it.message),
+                    error = true,
+                    title = MoonStrings.t("发送失败")
+                )
             }
         )
+        handler.post { maybeAutoPresent() }
     }
 
     // MARK: - 记录
@@ -2384,7 +2408,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val REQ_FILES = 1001
-        private const val REQ_ALBUM = 1004
+        private const val REQ_ALBUM = 1002
         private const val REQ_NOTIFICATIONS = 1003
         /** 读取 Wi-Fi 名称需要的位置权限 */
         private const val REQ_LOCATION = 1004

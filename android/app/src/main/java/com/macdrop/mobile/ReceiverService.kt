@@ -12,6 +12,8 @@ import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.IBinder
 import com.macdrop.mobile.net.MobileLog
+import com.macdrop.mobile.net.ReceiveConfirmation
+import com.macdrop.mobile.net.ReceiveProgress
 import com.macdrop.mobile.net.ReceiverRuntime
 import com.macdrop.mobile.net.ReceiverServer
 import com.macdrop.mobile.store.GallerySettings
@@ -35,6 +37,8 @@ class ReceiverService : Service() {
     private var baseName = ""
     private var instanceSuffix = 0
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val activeLock = Any()
+    private val active = mutableMapOf<String, ReceiveProgress>()
 
     override fun onCreate() {
         super.onCreate()
@@ -45,11 +49,10 @@ class ReceiverService : Service() {
 
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ID,
-                MoonStrings.t("文件接收"),
-                NotificationManager.IMPORTANCE_LOW
-            )
+            NotificationChannel(CHANNEL_ID, MoonStrings.t("文件接收"), NotificationManager.IMPORTANCE_LOW)
+        )
+        manager.createNotificationChannel(
+            NotificationChannel(CONFIRM_CHANNEL_ID, MoonStrings.t("接收确认"), NotificationManager.IMPORTANCE_HIGH)
         )
         startForeground(
             NOTIFICATION_ID,
@@ -58,23 +61,37 @@ class ReceiverService : Service() {
         )
 
         val store = MediaStoreStore(this)
+        store.cleanupStaging()
         val receiver = ReceiverServer(store, DeviceIdentity.name(this), DeviceIdentity.type(this))
-        receiver.onProgress = { fraction, name ->
-            ReceiverRuntime.receiving = true
-            ReceiverRuntime.progress = fraction
-            ReceiverRuntime.statusText = MoonStrings.f("接收中 %d%% · %s", (fraction * 100).toInt(), name)
-            ReceiverRuntime.notifyChanged()
+        receiver.onProgress = { progress ->
+            synchronized(activeLock) { active[progress.id] = progress }
+            publishReceiveState()
         }
-        receiver.onFinished = { entry ->
-            ReceiverRuntime.receiving = false
-            ReceiverRuntime.progress = 1.0
-            ReceiverRuntime.statusText = ""
-            // 媒体在 save() 里就已经落到相册目录，这里只如实反馈，不再复制第二份
+        receiver.onFinished = { id, entry ->
+            synchronized(activeLock) { active.remove(id) }
+            publishReceiveState()
             ReceiverRuntime.lastResult = if (GallerySettings.isInGallery(entry.relativePath)) {
                 MoonStrings.f("已接收并存入相册：%s", entry.name)
             } else {
                 MoonStrings.f("已接收：%s", entry.name)
             }
+            ReceiverRuntime.notifyChanged()
+        }
+        receiver.onStopped = { stopped ->
+            synchronized(activeLock) { active.remove(stopped.id) }
+            publishReceiveState()
+            ReceiverRuntime.lastResult = "${stopped.reason}：${stopped.name}"
+            ReceiverRuntime.notifyChanged()
+        }
+        receiver.onConfirm = { confirmation ->
+            ReceiverRuntime.addConfirmation(confirmation)
+            showConfirmationNotification(confirmation)
+            ReceiverRuntime.notifyChanged()
+        }
+        receiver.onConfirmationResolved = { batchID ->
+            ReceiverRuntime.removeConfirmation(batchID)
+            manager.cancel(CONFIRM_NOTIFICATION_ID)
+            ReceiverRuntime.pendingConfirmations.firstOrNull()?.let { showConfirmationNotification(it) }
             ReceiverRuntime.notifyChanged()
         }
 
@@ -89,13 +106,63 @@ class ReceiverService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // 改名后 Activity 会发这个：旧的注册必须先撤掉，再按新名字重新注册
-        if (intent?.action == ACTION_READVERTISE) {
-            server?.deviceName = DeviceIdentity.name(this)
-            reregister()
+        when (intent?.action) {
+            ACTION_READVERTISE -> {
+                server?.deviceName = DeviceIdentity.name(this)
+                reregister()
+            }
+            ACTION_CONFIRM_ACCEPT, ACTION_CONFIRM_REJECT -> {
+                val batchID = intent.getStringExtra(EXTRA_BATCH_ID)
+                if (!batchID.isNullOrEmpty()) {
+                    server?.resolveConfirmation(batchID, intent.action == ACTION_CONFIRM_ACCEPT)
+                }
+            }
         }
         return START_STICKY
     }
+
+    private fun publishReceiveState() {
+        val sessions = synchronized(activeLock) { active.values.toList() }
+        val received = sessions.sumOf { it.received }
+        val total = sessions.sumOf { it.total }
+        val fraction = if (total > 0) received.toDouble() / total else if (sessions.isEmpty()) 1.0 else 0.0
+        ReceiverRuntime.receiving = sessions.isNotEmpty()
+        ReceiverRuntime.progress = fraction.coerceIn(0.0, 1.0)
+        ReceiverRuntime.statusText = if (sessions.isEmpty()) "" else {
+            val detail = if (sessions.size == 1) sessions.first().name else MoonStrings.f("%d 个文件", sessions.size)
+            MoonStrings.f("接收中 %d%% · %s", (ReceiverRuntime.progress * 100).toInt(), detail)
+        }
+        ReceiverRuntime.notifyChanged()
+    }
+
+    private fun showConfirmationNotification(confirmation: ReceiveConfirmation) {
+        val openIntent = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val accept = PendingIntent.getService(
+            this, confirmation.batchID.hashCode(), confirmationIntent(ACTION_CONFIRM_ACCEPT, confirmation.batchID),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val reject = PendingIntent.getService(
+            this, confirmation.batchID.hashCode() + 1, confirmationIntent(ACTION_CONFIRM_REJECT, confirmation.batchID),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val size = android.text.format.Formatter.formatFileSize(this, confirmation.totalBytes)
+        val notification = Notification.Builder(this, CONFIRM_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_moondrop)
+            .setContentTitle(MoonStrings.f("%s 请求发送文件", confirmation.senderName))
+            .setContentText(MoonStrings.f("%d 个文件 · %s", confirmation.fileCount, size))
+            .setContentIntent(openIntent)
+            .setAutoCancel(true)
+            .addAction(Notification.Action.Builder(null, MoonStrings.t("拒绝"), reject).build())
+            .addAction(Notification.Action.Builder(null, MoonStrings.t("接收"), accept).build())
+            .build()
+        getSystemService(NotificationManager::class.java).notify(CONFIRM_NOTIFICATION_ID, notification)
+    }
+
+    private fun confirmationIntent(action: String, batchID: String): Intent =
+        Intent(this, ReceiverService::class.java).setAction(action).putExtra(EXTRA_BATCH_ID, batchID)
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -110,6 +177,11 @@ class ReceiverService : Service() {
         registrationListener = null
         server?.stop()
         server = null
+        ReceiverRuntime.receiving = false
+        ReceiverRuntime.statusText = ""
+        ReceiverRuntime.clearConfirmations()
+        getSystemService(NotificationManager::class.java).cancel(CONFIRM_NOTIFICATION_ID)
+        ReceiverRuntime.notifyChanged()
         super.onDestroy()
     }
 
@@ -269,7 +341,9 @@ class ReceiverService : Service() {
 
     companion object {
         private const val CHANNEL_ID = "macdrop_receive"
+        private const val CONFIRM_CHANNEL_ID = "macdrop_receive_confirmation"
         private const val NOTIFICATION_ID = 1
+        private const val CONFIRM_NOTIFICATION_ID = 2
         private const val PREFERRED_PORT = 52345
         private const val SERVICE_TYPE = "_macdrop._tcp"
         private const val MAX_REGISTER_ATTEMPTS = 6
@@ -277,5 +351,8 @@ class ReceiverService : Service() {
         private val REGISTER_BACKOFF_MS = longArrayOf(2_000L, 5_000L, 10_000L, 20_000L, 30_000L, 60_000L)
 
         const val ACTION_READVERTISE = "com.macdrop.mobile.action.READVERTISE"
+        const val ACTION_CONFIRM_ACCEPT = "com.macdrop.mobile.action.CONFIRM_ACCEPT"
+        const val ACTION_CONFIRM_REJECT = "com.macdrop.mobile.action.CONFIRM_REJECT"
+        const val EXTRA_BATCH_ID = "batch_id"
     }
 }
