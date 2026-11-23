@@ -2,7 +2,7 @@ import Foundation
 
 final class TransferClient {
     private static let chunkSize = 2 * 1024 * 1024
-    private static let confirmTimeout: TimeInterval = 120
+    private static let confirmTimeout: TimeInterval = 300
     private let parallelChunks = 3
     private let taskLock = NSLock()
     private var activeTask: Task<Void, Never>?
