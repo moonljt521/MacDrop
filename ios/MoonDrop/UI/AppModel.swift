@@ -69,6 +69,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var receiving = false
     @Published private(set) var receiveProgress: Double = 0
     @Published private(set) var receiveText = ""
+    @Published var receiveConfirmation: ReceiveConfirmation?
 
     @Published private(set) var received: [ReceivedItem] = []
     @Published private(set) var sentRecords: [SentRecord] = []
@@ -81,6 +82,9 @@ final class AppModel: ObservableObject {
     private var discovered: [Peer] = []
     private var manual: [Peer] = []
     private var started = false
+    private var receiveSessions: [String: ReceiveProgress] = [:]
+    private var confirmationQueue: [ReceiveConfirmation] = []
+    private var receivedRefreshID = 0
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     /// 发送期间单独申请的后台时间（跟接收分开放，互不影响）
     private var sendBackgroundTask: UIBackgroundTaskIdentifier = .invalid
@@ -147,11 +151,20 @@ final class AppModel: ObservableObject {
         browser.onPeersChanged = { [weak self] peers in
             Task { @MainActor in self?.applyDiscovered(peers) }
         }
-        server.onProgress = { [weak self] fraction, name in
-            Task { @MainActor in self?.handleReceiveProgress(fraction, name: name) }
+        server.onProgress = { [weak self] progress in
+            Task { @MainActor in self?.handleReceiveProgress(progress) }
         }
-        server.onFinished = { [weak self] url in
-            Task { @MainActor in self?.handleReceived(url) }
+        server.onFinished = { [weak self] id, url in
+            Task { @MainActor in self?.handleReceived(id: id, url: url) }
+        }
+        server.onStopped = { [weak self] stopped in
+            Task { @MainActor in self?.handleReceiveStopped(stopped) }
+        }
+        server.onConfirm = { [weak self] confirmation in
+            Task { @MainActor in self?.queueReceiveConfirmation(confirmation) }
+        }
+        server.onConfirmationResolved = { [weak self] batchID in
+            Task { @MainActor in self?.removeReceiveConfirmation(batchID: batchID) }
         }
     }
 
@@ -673,7 +686,7 @@ final class AppModel: ObservableObject {
         UIApplication.shared.isIdleTimerDisabled = true
         beginSendBackgroundTask()
 
-        client.send(files: files, to: peer, progress: { [weak self] sent, total, name in
+        client.send(files: files, to: peer, senderName: deviceName, progress: { [weak self] sent, total, name in
             Task { @MainActor in
                 guard let self else { return }
                 // 并发时回调可能乱序到达，进度只增不减
@@ -701,8 +714,13 @@ final class AppModel: ObservableObject {
                                     target: peer.name, size: totalBytes)
                 case .failure(let error):
                     self.sendText = ""
-                    self.resultText = moonTF("发送失败：%@", error.localizedDescription)
-                    self.resultIsError = true
+                    if error is CancellationError {
+                        self.resultText = moonT("已取消")
+                        self.resultIsError = false
+                    } else {
+                        self.resultText = moonTF("发送失败：%@", error.localizedDescription)
+                        self.resultIsError = true
+                    }
                 }
                 onFinish?(result)
             }
@@ -722,22 +740,18 @@ final class AppModel: ObservableObject {
 
     // MARK: - 接收
 
-    private func handleReceiveProgress(_ fraction: Double, name: String) {
-        receiving = true
-        receiveProgress = fraction
-        receiveText = moonTF("接收中 %d%% · %@", Int(fraction * 100), name)
+    private func handleReceiveProgress(_ progress: ReceiveProgress) {
+        receiveSessions[progress.id] = progress
+        updateReceiveState()
         scanSummary = ""
-        beginBackgroundTaskIfNeeded()
     }
 
-    private func handleReceived(_ url: URL) {
-        receiving = false
-        receiveProgress = 1
-        receiveText = ""
+    private func handleReceived(id: String, url: URL) {
+        receiveSessions.removeValue(forKey: id)
+        updateReceiveState()
         resultText = moonTF("已接收：%@", url.lastPathComponent)
         resultIsError = false
         refreshReceived()
-        endBackgroundTask()
         if autoSaveToPhotos, PhotoSaver.isMedia(url) {
             PhotoSaver.save(url) { [weak self] result in
                 guard let self else { return }
@@ -782,6 +796,44 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func handleReceiveStopped(_ stopped: ReceiveStopped) {
+        receiveSessions.removeValue(forKey: stopped.id)
+        updateReceiveState()
+        resultText = moonTF("%@：%@", stopped.reason, stopped.name)
+        resultIsError = true
+    }
+
+    private func updateReceiveState() {
+        let sessions = Array(receiveSessions.values)
+        let received = sessions.reduce(Int64(0)) { $0 + $1.received }
+        let total = sessions.reduce(Int64(0)) { $0 + $1.total }
+        receiving = !sessions.isEmpty
+        receiveProgress = total > 0 ? min(1, Double(received) / Double(total)) : (sessions.isEmpty ? 1 : 0)
+        receiveText = sessions.isEmpty ? "" : moonTF("接收中 %d%% · %d 个文件", Int(receiveProgress * 100), sessions.count)
+        if sessions.isEmpty { endBackgroundTask() } else { beginBackgroundTaskIfNeeded() }
+    }
+
+    private func queueReceiveConfirmation(_ confirmation: ReceiveConfirmation) {
+        guard !confirmationQueue.contains(where: { $0.batchID == confirmation.batchID }) else { return }
+        confirmationQueue.append(confirmation)
+        receiveConfirmation = confirmationQueue.first
+    }
+
+    private func removeReceiveConfirmation(batchID: String) {
+        confirmationQueue.removeAll { $0.batchID == batchID }
+        receiveConfirmation = confirmationQueue.first
+    }
+
+    func resolveReceiveConfirmation(accepted: Bool) {
+        guard let confirmation = receiveConfirmation else { return }
+        server.resolveConfirmation(batchID: confirmation.batchID, accepted: accepted)
+        removeReceiveConfirmation(batchID: confirmation.batchID)
+    }
+
+    func cancelSending() {
+        client.cancel()
+    }
+
     private func beginBackgroundTaskIfNeeded() {
         guard backgroundTask == .invalid else { return }
         backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "MoonDropReceive") { [weak self] in
@@ -811,7 +863,16 @@ final class AppModel: ObservableObject {
     // MARK: - 已接收文件
 
     func refreshReceived() {
-        received = store.receivedItems()
+        receivedRefreshID += 1
+        let refreshID = receivedRefreshID
+        let store = self.store
+        DispatchQueue.global(qos: .userInitiated).async {
+            let items = store.receivedItems()
+            Task { @MainActor in
+                guard refreshID == self.receivedRefreshID else { return }
+                self.received = items
+            }
+        }
     }
 
     func deleteItems(at offsets: IndexSet) {

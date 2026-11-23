@@ -128,7 +128,8 @@ final class ShareViewController: UIViewController {
 
     private func setBusy(_ busy: Bool) {
         sending = busy
-        doneButton.isEnabled = !busy
+        doneButton.isEnabled = true
+        doneButton.setTitle(busy ? "取消发送" : "取消", for: .normal)
         saveButton.isEnabled = !busy
         renderDevices()
     }
@@ -257,7 +258,7 @@ final class ShareViewController: UIViewController {
         let browser = PeerBrowser(ownID: deviceID)
         browser.onPeersChanged = { [weak self] list in
             guard let self else { return }
-            self.peers = list.filter { $0.name != UIDevice.current.name }
+            self.peers = list
             self.renderDevices()
         }
         browser.browse()
@@ -284,7 +285,7 @@ final class ShareViewController: UIViewController {
         progressView.progress = 0
         statusLabel.text = "准备发送…"
 
-        client.send(files: files, to: peer, progress: { [weak self] sent, total, name in
+        client.send(files: files, to: peer, senderName: UIDevice.current.name, progress: { [weak self] sent, total, name in
             DispatchQueue.main.async {
                 guard let self else { return }
                 let fraction = total > 0 ? Double(sent) / Double(total) : 0
@@ -308,10 +309,20 @@ final class ShareViewController: UIViewController {
                     }
                 case .failure(let error):
                     self.progressView.isHidden = true
-                    self.statusLabel.text = "发送失败：\(error.localizedDescription)"
-                    self.titleLabel.text = "发送失败"
-                    self.saveButton.isHidden = false
-                    self.setBusy(false)
+                    if error is CancellationError {
+                        self.statusLabel.text = "已取消"
+                        self.titleLabel.text = "已取消"
+                        self.removeStaging()
+                        self.setBusy(false)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            self.extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
+                        }
+                    } else {
+                        self.statusLabel.text = "发送失败：\(error.localizedDescription)"
+                        self.titleLabel.text = "发送失败"
+                        self.saveButton.isHidden = false
+                        self.setBusy(false)
+                    }
                 }
             }
         })
@@ -358,7 +369,12 @@ final class ShareViewController: UIViewController {
     }
 
     @objc private func doneTapped() {
-        guard !sending else { return }
+        if sending {
+            statusLabel.text = "正在取消…"
+            doneButton.isEnabled = false
+            client.cancel()
+            return
+        }
         removeStaging()
         browser?.stop()
         browser = nil

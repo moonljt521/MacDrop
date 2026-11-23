@@ -249,11 +249,15 @@ struct ContentView: View {
     private var centralField: some View {
         Group {
             if model.sending {
-                MoonTransferCard(mode: .sending(
-                    progress: model.sendProgress,
-                    detail: model.sendText.isEmpty ? moonT("准备发送…") : model.sendText,
-                    large: model.sendLargeFile
-                ))
+                VStack(spacing: 0) {
+                    MoonTransferCard(mode: .sending(
+                        progress: model.sendProgress,
+                        detail: model.sendText.isEmpty ? moonT("准备发送…") : model.sendText,
+                        large: model.sendLargeFile
+                    ))
+                    MoonTextAction(title: moonT("取消发送"), enabled: true) { model.cancelSending() }
+                        .padding(.bottom, 16)
+                }
             } else if model.receiving {
                 MoonTransferCard(mode: .receiving(
                     progress: model.receiveProgress,
@@ -907,6 +911,17 @@ private struct ContentDialogs: ViewModifier {
                 Button(moonT("取消"), role: .cancel) {}
             } message: {
                 Text(moonT("其他设备的 MoonDrop 列表里显示这个名字，最长 24 个字符。"))
+            }
+            .alert(item: $model.receiveConfirmation) { request in
+                let size = ByteCountFormatter.string(fromByteCount: request.totalBytes, countStyle: .file)
+                return Alert(
+                    title: Text(moonTF("%@ 请求发送文件", request.senderName)),
+                    message: Text(request.fileCount > 1
+                        ? moonTF("%d 个文件，共 %@\n首个文件：%@", request.fileCount, size, request.firstName)
+                        : moonTF("%@\n%@", request.firstName, size)),
+                    primaryButton: .default(Text(moonT("接收"))) { model.resolveReceiveConfirmation(accepted: true) },
+                    secondaryButton: .destructive(Text(moonT("拒绝"))) { model.resolveReceiveConfirmation(accepted: false) }
+                )
             }
             .confirmationDialog(moonT("发送到哪台设备？"),
                                 isPresented: $model.showingDevicePicker,
