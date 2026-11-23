@@ -6,9 +6,9 @@ Native file transfer between **Mac, iPhone and Android** over the local network.
 
 | Platform | Stack | Directory | Minimum OS | Version |
 |---|---|---|---|---|
-| macOS | Swift · AppKit | [`macos/`](macos) | macOS 13 | 1.6 |
-| iOS | Swift · SwiftUI · Network.framework | [`ios/`](ios) | iOS 16 | 1.6.0 |
-| Android | Kotlin · platform APIs | [`android/`](android) | Android 10 (API 29) | 1.6.0 |
+| macOS | Swift · AppKit | [`macos/`](macos) | macOS 13 | 1.6.1 |
+| iOS | Swift · SwiftUI · Network.framework | [`ios/`](ios) | iOS 16 | 1.6.1 |
+| Android | Kotlin · platform APIs | [`android/`](android) | Android 10 (API 29) | 1.6.1 |
 
 > The product is MoonDrop; the repository and the LAN protocol keep their original `macdrop` identifiers (`_macdrop._tcp`, `com.macdrop.*`) so existing installs stay compatible.
 

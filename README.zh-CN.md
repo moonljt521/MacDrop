@@ -6,9 +6,9 @@
 
 | 平台 | 技术栈 | 目录 | 最低系统 | 版本 |
 |---|---|---|---|---|
-| macOS | Swift · AppKit | [`macos/`](macos) | macOS 13 | 1.6 |
-| iOS | Swift · SwiftUI · Network.framework | [`ios/`](ios) | iOS 16 | 1.6.0 |
-| Android | Kotlin · 平台原生 API | [`android/`](android) | Android 10（API 29） | 1.6.0 |
+| macOS | Swift · AppKit | [`macos/`](macos) | macOS 13 | 1.6.1 |
+| iOS | Swift · SwiftUI · Network.framework | [`ios/`](ios) | iOS 16 | 1.6.1 |
+| Android | Kotlin · 平台原生 API | [`android/`](android) | Android 10（API 29） | 1.6.1 |
 
 > 产品名是 MoonDrop；代码仓库与局域网协议沿用原来的 `macdrop` 标识（`_macdrop._tcp`、`com.macdrop.*`），以保证已安装的旧版本仍能互通。
 

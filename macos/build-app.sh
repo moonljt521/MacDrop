@@ -36,8 +36,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
     <key>CFBundleName</key>                  <string>MoonDrop</string>
     <key>CFBundleDisplayName</key>           <string>MoonDrop</string>
     <key>CFBundleIdentifier</key>            <string>com.macdrop.app</string>
-    <key>CFBundleVersion</key>               <string>8</string>
-    <key>CFBundleShortVersionString</key>    <string>1.6</string>
+    <key>CFBundleVersion</key>               <string>9</string>
+    <key>CFBundleShortVersionString</key>    <string>1.6.1</string>
     <key>CFBundleExecutable</key>            <string>MoonDrop</string>
     <key>CFBundlePackageType</key>           <string>APPL</string>
     <key>CFBundleIconFile</key>              <string>AppIcon</string>
