@@ -23,5 +23,8 @@ android/.gradle/
 android/local.properties
 android/.idea/
 android/**/build/
+# 正式签名材料与口令不入库
+android/keystore/
+android/keystore.properties
 *.iml
 assets/icon/AppIcon.iconset/

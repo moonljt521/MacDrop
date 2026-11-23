@@ -88,6 +88,17 @@ cd android && ./gradlew assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
+`debug` 与 `release` 都用项目正式签名，所以调试包能覆盖已安装的发布包，反之亦然。密钥配置放在不入库的 `android/keystore.properties`：
+
+```properties
+storeFile=keystore/moondrop-release.jks
+storePassword=…
+keyAlias=moondrop
+keyPassword=…
+```
+
+请备份 `keystore/moondrop-release.jks` 和口令——丢失后新包就无法再覆盖升级已安装的 App。缺少该文件时构建会直接报错，不会产出未签名或 debug 签名的发布包。
+
 普通文件发布到 **下载/来自另一台Mac**；默认设置下，图片/视频直接写入 **Pictures/MoonDrop**、**Movies/MoonDrop**，这本身就是唯一的一份，不会额外复制。接收端以前台服务运行，切到后台仍可继续接收。
 
 ## 使用

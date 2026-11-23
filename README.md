@@ -88,6 +88,17 @@ cd android && ./gradlew assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
+Both `debug` and `release` are signed with the project release key, so a debug build can replace an installed release build and vice versa. The key lives in a git-ignored `android/keystore.properties`:
+
+```properties
+storeFile=keystore/moondrop-release.jks
+storePassword=…
+keyAlias=moondrop
+keyPassword=…
+```
+
+Keep `keystore/moondrop-release.jks` and that password backed up — losing them means future builds can no longer update an installed app. Without the file the build fails on purpose.
+
 Ordinary files are published to **Download/来自另一台Mac**. With the default setting, photos and videos go straight to **Pictures/MoonDrop** / **Movies/MoonDrop** as the single copy — they are not saved a second time. The receiver runs as a foreground service, so transfers continue in the background.
 
 ## Usage

@@ -1,6 +1,17 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+}
+
+// 正式签名：keystore 与口令放在本地 keystore.properties（不入库），
+// 证书沿用 1.6.0 及更早的发布包，已装设备可以直接覆盖升级。
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) {
+        keystorePropsFile.inputStream().use { load(it) }
+    }
 }
 
 android {
@@ -15,11 +26,26 @@ android {
         versionName = "1.6.1"
     }
 
+    signingConfigs {
+        create("release") {
+            check(keystorePropsFile.exists()) {
+                "缺少 $keystorePropsFile：发布构建需要正式签名，请按 README 的说明创建 keystore.properties"
+            }
+            storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+            storePassword = keystoreProps.getProperty("storePassword")
+            keyAlias = keystoreProps.getProperty("keyAlias")
+            keyPassword = keystoreProps.getProperty("keyPassword")
+        }
+    }
+
     buildTypes {
+        debug {
+            // 调试包也用正式签名，避免同一台设备上签名的两份包互相覆盖失败
+            signingConfig = signingConfigs.getByName("release")
+        }
         release {
             isMinifyEnabled = false
-            // 个人侧载：沿用 debug 签名，便于直接覆盖安装调试版
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
