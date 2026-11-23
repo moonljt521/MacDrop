@@ -126,8 +126,8 @@ cd macos
 ## Security
 
 - Plain HTTP: traffic is **not** encrypted, and the receiver does **not** authenticate senders.
-- Any host that can reach the port may send files — use MoonDrop on trusted networks only.
-- Peer file names are sanitized, and existing files are never overwritten.
+- A host that can reach the port may request a transfer, but the receiver must explicitly accept each batch before any staging file is created. Rejected requests never reach the received files or photo library.
+- Peer file names are sanitized, chunk offsets and sizes are bounded, and existing files are never overwritten.
 - `/macdrop/quit` is loopback-only and exists on macOS only.
 
 ## Limitations
