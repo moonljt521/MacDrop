@@ -40,6 +40,7 @@ final class TransferServer {
         let confirmation: ReceiveConfirmation
         var accepted: Bool?
         var touched: Date
+        var created: Date
     }
 
     private final class Entry {
@@ -212,12 +213,14 @@ final class TransferServer {
             if pending.count >= Self.maxSessions {
                 response = .failure("等待确认的传输过多", status: 429)
             } else {
-                batches[batchID] = Batch(confirmation: confirmation, accepted: nil, touched: Date())
+                batches[batchID] = Batch(confirmation: confirmation, accepted: nil, touched: Date(), created: Date())
                 pending[id] = item
                 confirm = confirmation
                 response = Self.pendingResponse()
             }
         } else if batches[batchID]?.accepted == nil {
+            // 发送端每 0.5 秒轮询一次；刷新时间戳，用户还在看弹窗时请求不会被作废
+            batches[batchID]?.touched = Date()
             pending[id] = item
             response = Self.pendingResponse()
         } else {
@@ -258,10 +261,14 @@ final class TransferServer {
         entry.lock.lock()
         defer { entry.lock.unlock() }
         guard offset >= 0, offset % Int64(Self.chunkSize) == 0, offset < entry.meta.total else {
+            MobileLog.write("chunk 越界 id=\(id.prefix(8)) offset=\(offset) total=\(entry.meta.total)")
             return .failure("分块偏移越界")
         }
         let expected = min(Int64(Self.chunkSize), entry.meta.total - offset)
-        guard Int64(request.body.count) == expected else { return .failure("分块大小不符") }
+        guard Int64(request.body.count) == expected else {
+            MobileLog.write("chunk 长度不符 id=\(id.prefix(8)) got=\(request.body.count) want=\(expected)")
+            return .failure("分块大小不符")
+        }
         do {
             let handle = try FileHandle(forWritingTo: entry.url)
             defer { try? handle.close() }
@@ -341,13 +348,15 @@ final class TransferServer {
         }
         var expired: Set<String> = []
         for (id, item) in pending {
-            guard let batch = batches[item.batchID], now.timeIntervalSince(batch.touched) > Self.confirmTimeout else { continue }
+            guard let batch = batches[item.batchID],
+                  now.timeIntervalSince(batch.touched) > Self.confirmIdleTimeout
+                    || now.timeIntervalSince(batch.created) > Self.confirmHardLimit else { continue }
             pending.removeValue(forKey: id)
             batches[item.batchID]?.accepted = false
             expired.insert(item.batchID)
         }
         batches = batches.filter { _, batch in
-            batch.accepted == nil || now.timeIntervalSince(batch.touched) < Self.batchRetention
+            batch.accepted == nil || now.timeIntervalSince(batch.created) < Self.batchRetention
         }
         lock.unlock()
         stopped.forEach { onStopped?($0) }
@@ -361,6 +370,9 @@ final class TransferServer {
     private static let chunkSize = 2 * 1024 * 1024
     private static let maxSessions = 8
     private static let receiveIdleTimeout: TimeInterval = 20
-    private static let confirmTimeout: TimeInterval = 120
+    /// 发送端停止轮询这么久，就认为对方已放弃，关掉弹窗
+    private static let confirmIdleTimeout: TimeInterval = 20
+    /// 兜底上限：发送端一直轮询但没人处理，也不能无限挂着
+    private static let confirmHardLimit: TimeInterval = 600
     private static let batchRetention: TimeInterval = 600
 }

@@ -389,7 +389,7 @@ final class TransferEngine {
                         self.awaitAcceptance(transferID: transferID, fileName: fileName, relPath: relPath,
                                              total: total, rootName: rootName, batchID: batchID,
                                              fileCount: fileCount, batchBytes: batchBytes, baseURL: base,
-                                             deadline: Date().addingTimeInterval(120), completion: completion)
+                                             deadline: Date().addingTimeInterval(300), completion: completion)
                     }
                 case .failure(let error):
                     NSLog("[MoonDrop] 连接失败 \(base): \(error)")

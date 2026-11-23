@@ -352,6 +352,6 @@ class TransferClient {
     companion object {
         private const val CHUNK_SIZE = 2 * 1024 * 1024
         private const val PARALLEL_CHUNKS = 3
-        private const val CONFIRM_TIMEOUT_MS = 120_000L
+        private const val CONFIRM_TIMEOUT_MS = 300_000L
     }
 }

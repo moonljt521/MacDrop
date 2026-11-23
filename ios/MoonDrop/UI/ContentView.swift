@@ -893,6 +893,24 @@ private struct ContentAttachments: ViewModifier {
 }
 
 /// 首屏的确认弹窗与结果反馈。
+private struct RenameAlert: ViewModifier {
+    @EnvironmentObject private var model: AppModel
+    @Binding var showing: Bool
+    @Binding var text: String
+
+    func body(content: Content) -> some View {
+        content.alert(moonT("重命名本机"), isPresented: $showing) {
+            TextField(moonT("例如 书房的那台 iPhone"), text: $text)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button(moonT("保存")) { model.rename(to: text) }
+            Button(moonT("取消"), role: .cancel) {}
+        } message: {
+            Text(moonT("其他设备的 MoonDrop 列表里显示这个名字，最长 24 个字符。"))
+        }
+    }
+}
+
 private struct ContentDialogs: ViewModifier {
     @EnvironmentObject private var model: AppModel
     @ObservedObject private var prefs = MoonPreferences.shared
@@ -902,26 +920,22 @@ private struct ContentDialogs: ViewModifier {
     let takeSendTarget: () -> Peer?
 
     func body(content: Content) -> some View {
+        // 注意：SwiftUI 同一个 view 上只能挂一个 .alert，挂两个时后一个能显示但按钮动作不会触发。
+        // 重命名弹窗放进独立的 ViewModifier，让两个 alert 落在不同视图节点上。
         content
-            .alert(moonT("重命名本机"), isPresented: $showingRename) {
-                TextField(moonT("例如 书房的那台 iPhone"), text: $renameText)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                Button(moonT("保存")) { model.rename(to: renameText) }
-                Button(moonT("取消"), role: .cancel) {}
-            } message: {
-                Text(moonT("其他设备的 MoonDrop 列表里显示这个名字，最长 24 个字符。"))
-            }
-            .alert(item: $model.receiveConfirmation) { request in
+            .modifier(RenameAlert(showing: $showingRename, text: $renameText))
+            .alert(
+                model.receiveConfirmation.map { moonTF("%@ 请求发送文件", $0.senderName) } ?? moonT("接收文件"),
+                isPresented: $model.showingReceiveConfirmation,
+                presenting: model.receiveConfirmation
+            ) { request in
+                Button(moonT("接收")) { model.resolveReceiveConfirmation(accepted: true) }
+                Button(moonT("拒绝"), role: .cancel) { model.resolveReceiveConfirmation(accepted: false) }
+            } message: { request in
                 let size = ByteCountFormatter.string(fromByteCount: request.totalBytes, countStyle: .file)
-                return Alert(
-                    title: Text(moonTF("%@ 请求发送文件", request.senderName)),
-                    message: Text(request.fileCount > 1
-                        ? moonTF("%d 个文件，共 %@\n首个文件：%@", request.fileCount, size, request.firstName)
-                        : moonTF("%@\n%@", request.firstName, size)),
-                    primaryButton: .default(Text(moonT("接收"))) { model.resolveReceiveConfirmation(accepted: true) },
-                    secondaryButton: .destructive(Text(moonT("拒绝"))) { model.resolveReceiveConfirmation(accepted: false) }
-                )
+                Text(request.fileCount > 1
+                    ? moonTF("%d 个文件，共 %@\n首个文件：%@", request.fileCount, size, request.firstName)
+                    : moonTF("%@\n%@", request.firstName, size))
             }
             .confirmationDialog(moonT("发送到哪台设备？"),
                                 isPresented: $model.showingDevicePicker,

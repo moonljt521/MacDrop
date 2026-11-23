@@ -70,6 +70,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var receiveProgress: Double = 0
     @Published private(set) var receiveText = ""
     @Published var receiveConfirmation: ReceiveConfirmation?
+    @Published var showingReceiveConfirmation = false
 
     @Published private(set) var received: [ReceivedItem] = []
     @Published private(set) var sentRecords: [SentRecord] = []
@@ -816,16 +817,33 @@ final class AppModel: ObservableObject {
     private func queueReceiveConfirmation(_ confirmation: ReceiveConfirmation) {
         guard !confirmationQueue.contains(where: { $0.batchID == confirmation.batchID }) else { return }
         confirmationQueue.append(confirmation)
-        receiveConfirmation = confirmationQueue.first
+        presentNextReceiveConfirmation()
     }
 
+    private func presentNextReceiveConfirmation() {
+        guard !showingReceiveConfirmation, let next = confirmationQueue.first else { return }
+        receiveConfirmation = next
+        showingReceiveConfirmation = true
+    }
+
+    /// 请求被处理、被拒绝或因对方放弃而失效时，先收起弹窗再考虑下一个，
+    /// 否则一个已经作废的弹窗会留在屏幕上，用户点了也没有任何反应。
     private func removeReceiveConfirmation(batchID: String) {
         confirmationQueue.removeAll { $0.batchID == batchID }
-        receiveConfirmation = confirmationQueue.first
+        guard receiveConfirmation?.batchID == batchID else { return }
+        showingReceiveConfirmation = false
+        receiveConfirmation = nil
+        DispatchQueue.main.async { [weak self] in
+            self?.presentNextReceiveConfirmation()
+        }
     }
 
     func resolveReceiveConfirmation(accepted: Bool) {
-        guard let confirmation = receiveConfirmation else { return }
+        guard let confirmation = receiveConfirmation else {
+            MobileLog.write("确认失败：当前没有待处理请求")
+            return
+        }
+        MobileLog.write("用户选择 accepted=\(accepted) batch=\(confirmation.batchID.prefix(8))")
         server.resolveConfirmation(batchID: confirmation.batchID, accepted: accepted)
         removeReceiveConfirmation(batchID: confirmation.batchID)
     }

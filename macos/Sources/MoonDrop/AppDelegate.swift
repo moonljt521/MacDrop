@@ -33,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var confirmation: Confirmation
         var accepted: Bool?
         var touched: Date
+        var created: Date
     }
 
     /// HTTP 服务是并发线程，路由里对以下状态都必须加锁
@@ -188,14 +189,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             lastRecvPercent.removeValue(forKey: id)
             lastActivity.removeValue(forKey: id)
         }
-        let confirmDeadline = Date().addingTimeInterval(-120)
-        let expired = batches.filter { $0.value.accepted == nil && $0.value.touched < confirmDeadline }.map { $0.key }
+        // 发送端停止轮询 20 秒才判定放弃；另设 10 分钟硬上限兜底
+        let now = Date()
+        let expired = batches.filter { _, batch in
+            guard batch.accepted == nil else { return false }
+            return now.timeIntervalSince(batch.touched) > 20 || now.timeIntervalSince(batch.created) > 600
+        }.map { $0.key }
         for batchID in expired {
             batches[batchID]?.accepted = false
             batches[batchID]?.touched = Date()
             pendingBegins = pendingBegins.filter { $0.value.batchID != batchID }
         }
-        batches = batches.filter { $0.value.accepted == nil || Date().timeIntervalSince($0.value.touched) < 600 }
+        batches = batches.filter { $0.value.accepted == nil || now.timeIntervalSince($0.value.created) < 600 }
         stateLock.unlock()
 
         for victim in victims {
@@ -359,13 +364,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 stateLock.unlock()
                 return .failure("等待确认的传输过多", status: 429)
             }
-            batches[batchID] = Batch(confirmation: confirmation, accepted: nil, touched: Date())
+            batches[batchID] = Batch(confirmation: confirmation, accepted: nil, touched: Date(), created: Date())
             pendingBegins[id] = item
             stateLock.unlock()
             DispatchQueue.main.async { self.enqueueConfirmation(confirmation) }
             return pendingConfirmationResponse()
         }
         if batches[batchID]?.accepted == nil {
+            // 发送端每 0.5 秒轮询一次；刷新时间戳，用户还在看弹窗时请求不会被作废
+            batches[batchID]?.touched = Date()
             pendingBegins[id] = item
             stateLock.unlock()
             return pendingConfirmationResponse()

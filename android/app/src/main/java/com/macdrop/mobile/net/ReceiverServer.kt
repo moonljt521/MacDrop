@@ -37,7 +37,8 @@ class ReceiverServer(
     private data class Batch(
         val confirmation: ReceiveConfirmation,
         var accepted: Boolean?,
-        var touched: Long
+        var touched: Long,
+        val created: Long
     )
 
     private data class Entry(
@@ -144,13 +145,15 @@ class ReceiverServer(
                     if (pending.size >= MAX_SESSIONS) {
                         response = HttpServer.Response.text("等待确认的传输过多", 429)
                     } else {
-                        batches[batchID] = Batch(confirmation, null, System.currentTimeMillis())
+                        val now = System.currentTimeMillis()
+                        batches[batchID] = Batch(confirmation, null, now, now)
                         pending[id] = begin
                         confirm = confirmation
                         response = pendingResponse()
                     }
                 }
                 batch.accepted == null -> {
+                    batch.touched = System.currentTimeMillis()
                     pending[id] = begin
                     response = pendingResponse()
                 }
@@ -257,14 +260,18 @@ class ReceiverServer(
         }
         val expiredBatches = mutableListOf<String>()
         synchronized(lock) {
-            pending.entries.filter { now - (batches[it.value.batchID]?.touched ?: now) > CONFIRM_TIMEOUT_MS }
+            // 发送端每 0.5 秒轮询一次：停止轮询 20 秒才过期，用户看弹窗期间不会被作废
+            pending.entries.filter {
+                val batch = batches[it.value.batchID]
+                batch == null || now - batch.touched > CONFIRM_IDLE_TIMEOUT_MS || now - batch.created > CONFIRM_HARD_LIMIT_MS
+            }
                 .forEach { (id, begin) ->
                     pending.remove(id)
                     batches[begin.batchID]?.accepted = false
                     expiredBatches += begin.batchID
                 }
             batches.entries.removeAll { (_, batch) ->
-                batch.accepted != null && now - batch.touched > BATCH_RETENTION_MS
+                batch.accepted != null && now - batch.created > BATCH_RETENTION_MS
             }
         }
         stopped.forEach { onStopped?.invoke(it) }
@@ -277,7 +284,8 @@ class ReceiverServer(
         private const val CHUNK_SIZE = 2 * 1024 * 1024
         private const val MAX_SESSIONS = 8
         private const val RECEIVE_IDLE_MS = 20_000L
-        private const val CONFIRM_TIMEOUT_MS = 120_000L
+        private const val CONFIRM_IDLE_TIMEOUT_MS = 20_000L
+        private const val CONFIRM_HARD_LIMIT_MS = 600_000L
         private const val BATCH_RETENTION_MS = 600_000L
     }
 }
