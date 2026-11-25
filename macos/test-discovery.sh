@@ -24,12 +24,15 @@ cleanup() {
 trap cleanup EXIT
 
 echo "==> 启动 Peer A（$P1）"
-MACDROP_RECV_DIR="$D1" MACDROP_PORT=$P1 MACDROP_NAME="PeerA" MACDROP_ID="test-id-A" "$BIN" > "$TMP/peerA.log" 2>&1 &
+# AUTO_ACCEPT：接收前确认需要人点「接收」，无头测试里没人点，会一直停在 202
+MACDROP_RECV_DIR="$D1" MACDROP_PORT=$P1 MACDROP_NAME="PeerA" MACDROP_ID="test-id-A" MACDROP_AUTO_ACCEPT=1 \
+    "$BIN" > "$TMP/peerA.log" 2>&1 &
 A=$!
 sleep 1.5
 
 echo "==> 启动 Peer B（$P2）"
-MACDROP_RECV_DIR="$D2" MACDROP_PORT=$P2 MACDROP_NAME="PeerB" MACDROP_ID="test-id-B" "$BIN" > "$TMP/peerB.log" 2>&1 &
+MACDROP_RECV_DIR="$D2" MACDROP_PORT=$P2 MACDROP_NAME="PeerB" MACDROP_ID="test-id-B" MACDROP_AUTO_ACCEPT=1 \
+    "$BIN" > "$TMP/peerB.log" 2>&1 &
 B=$!
 sleep 3
 
@@ -83,31 +86,72 @@ echo
 echo "==> 验证 4: B → A 真实跨实例传输"
 SRC="$TMP/cross-$$.txt"
 /usr/bin/python3 -c "open('$SRC','w').write('hello from PeerB to PeerA\n'*5000)"
-/usr/bin/python3 - "$P1" "$SRC" <<'PYEOF'
-import sys, urllib.request, urllib.parse, uuid, os
+# 接收前确认协议：begin 先回 202 等对方确认，确认后才回 200 并建暂存。
+# 这里必须轮询到 200 再发分块，否则 chunk 会拿到 404（未知传输 ID）。
+# 整段放进 if 里：跨实例传输失败也要继续跑后面的验证，不能让 set -e 把脚本掐断。
+if ! /usr/bin/python3 - "$P1" "$SRC" <<'PYEOF'
+import sys, urllib.request, urllib.parse, urllib.error, uuid, os, time
+
 port, path = sys.argv[1], sys.argv[2]
 tid = str(uuid.uuid4()); base = f"http://127.0.0.1:{port}"
 name = os.path.basename(path); size = os.path.getsize(path)
+
 def post(url, data=None):
     req = urllib.request.Request(url, data=data, method="POST")
-    with urllib.request.urlopen(req, timeout=30) as r: return r.status
-q = urllib.parse.urlencode({"name": name, "path": name, "size": str(size), "root": ""})
-post(f"{base}/macdrop/begin?id={tid}&{q}")
-data = open(path,"rb").read(); off = 0
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+q = urllib.parse.urlencode({"name": name, "path": name, "size": str(size), "root": "",
+                            "batch": str(uuid.uuid4()), "from": "PeerB",
+                            "files": "1", "bytes": str(size)})
+url = f"{base}/macdrop/begin?id={tid}&{q}"
+deadline = time.time() + 30
+status = 0
+while time.time() < deadline:
+    status = post(url)
+    if status == 200:
+        break
+    if status != 202:
+        print(f"  begin 返回意外状态 {status}")
+        sys.exit(1)
+    time.sleep(0.2)
+else:
+    print("  begin 30 秒内没等到确认通过")
+    sys.exit(1)
+
+data = open(path, "rb").read(); off = 0
 while off < len(data):
-    c = data[off:off+2*1024*1024]; post(f"{base}/macdrop/chunk?id={tid}&offset={off}", c); off += len(c)
-post(f"{base}/macdrop/finish?id={tid}")
+    c = data[off:off + 2 * 1024 * 1024]
+    s = post(f"{base}/macdrop/chunk?id={tid}&offset={off}", c)
+    if s != 200:
+        print(f"  chunk offset={off} 返回 {s}")
+        sys.exit(1)
+    off += len(c)
+
+s = post(f"{base}/macdrop/finish?id={tid}")
+if s != 200:
+    print(f"  finish 返回 {s}")
+    sys.exit(1)
 print(f"  已推送 {size} 字节到 Peer A")
 PYEOF
-sleep 1
-if [ -f "$D1/$(basename "$SRC")" ]; then
-    echo "  ✓ Peer A 落盘成功：$D1/$(basename "$SRC")"
-    head -1 "$D1/$(basename "$SRC")" | sed 's/^/    内容首行: /'
+then
+    echo "  ✗ 跨实例传输失败"
 else
-    echo "  ✗ Peer A 未落盘"; ls -la "$D1" || true
+    sleep 1
+    if [ -f "$D1/$(basename "$SRC")" ]; then
+        echo "  ✓ Peer A 落盘成功：$D1/$(basename "$SRC")"
+        head -1 "$D1/$(basename "$SRC")" | sed 's/^/    内容首行: /'
+    else
+        echo "  ✗ Peer A 未落盘"; ls -la "$D1" || true
+    fi
 fi
 
 kill $A $B 2>/dev/null || true
+# wait 回收后台任务，否则 bash 会把 SIGTERM 的 "Terminated" 打到输出里
+wait "$A" "$B" 2>/dev/null || true
 A=""; B=""
 sleep 0.5
 rm -f "$SRC"
@@ -163,6 +207,7 @@ else
 fi
 
 kill $SA $SB 2>/dev/null || true
+wait "$SA" "$SB" 2>/dev/null || true
 SA=""; SB=""
 sleep 0.5
 rm -rf "$SD1" "$SD2" "$D1" "$D2"

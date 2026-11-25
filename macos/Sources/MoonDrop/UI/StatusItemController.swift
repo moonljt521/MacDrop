@@ -349,8 +349,11 @@ enum FinderBridge {
     static func selectedURLs() -> [URL] {
         guard let script else { return [] }
         var err: NSDictionary?
-        guard let result = script.executeAndReturnError(&err) as? String else { return [] }
-        return result.split(separator: "\n").compactMap {
+        // executeAndReturnError 返回的是 NSAppleEventDescriptor，不是 String：
+        // 直接强转 String 恒失败，选中的文件会被静默丢掉（编译器会警告 always fails）
+        let descriptor = script.executeAndReturnError(&err)
+        guard let text = descriptor.stringValue else { return [] }
+        return text.split(separator: "\n").compactMap {
             let s = $0.trimmingCharacters(in: .whitespacesAndNewlines)
             return s.isEmpty ? nil : URL(fileURLWithPath: s)
         }
@@ -369,7 +372,7 @@ enum Logger {
         let line = "[\(ISO8601DateFormatter().string(from: Date()))] \(s)\n"
         if let fh = try? FileHandle(forWritingTo: logFile) {
             defer { try? fh.close() }
-            try? fh.seekToEnd()
+            _ = try? fh.seekToEnd()
             try? fh.write(contentsOf: Data(line.utf8))
         } else {
             try? Data(line.utf8).write(to: logFile)
