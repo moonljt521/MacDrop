@@ -286,6 +286,7 @@ object MoonStrings {
         "无法移除下载目录里的原件" to "Unable to remove the original from Downloads",
         "无法读取 %s" to "Unable to read %s",
         "无法连接对端" to "Unable to reach the device",
+        "对方正在接收其它文件，请稍后重试" to "The other device is receiving other files. Try again shortly.",
         "%s（对方可能在后台或已离线，请在对方屏幕上打开 MoonDrop）" to
             "%s (the other device may be in the background or offline; open MoonDrop on its screen)"
     )

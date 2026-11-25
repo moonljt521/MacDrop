@@ -14,12 +14,32 @@ import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicIntegerArray
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicReferenceArray
 import kotlin.concurrent.thread
 
 class TransferClient {
+
+    private data class ChunkTask(
+        val sessionIndex: Int,
+        val offset: Long,
+        val data: ByteArray,
+        /** 这一批已完成的文件数；发完一个文件后 +1 */
+        val waveFinished: AtomicInteger
+    )
+
+    /** 一次 begin 的结果 */
+    private enum class BeginState {
+        /** 200：会话已建立 */
+        ACCEPTED,
+        /** 202：等对方确认 */
+        PENDING,
+        /** 429：对方同时在收的文件太多，稍后重试 */
+        BUSY
+    }
 
     fun send(
         files: List<OutgoingFile>,
@@ -47,26 +67,11 @@ class TransferClient {
                 val bases = (listOf(peer.host) + peer.alternatives).map {
                     "http://${NetUtil.formatHost(it)}:${peer.port}"
                 }
-                for (file in prepared) {
-                    val id = UUID.randomUUID().toString()
-                    val root = if (file.relativePath.contains('/')) {
-                        file.relativePath.substringBefore('/')
-                    } else {
-                        null
-                    }
-                    val base = announce(
-                        bases, id, file, root, batchID, senderName, prepared.size, total
-                    )
-                    sessions += Session(file, id, base)
-                }
-
-                sessions.filter { it.file.size == 0L }.forEach { session ->
-                    finish(session.base, session.transferID)
-                }
                 val remaining = AtomicIntegerArray(IntArray(prepared.size) { chunkCount(prepared[it].size) })
+                val sessionArray = AtomicReferenceArray<Session?>(prepared.size)
                 val queue = LinkedBlockingQueue<ChunkTask>(PARALLEL_CHUNKS * 2)
                 val aborted = AtomicBoolean(false)
-                val readersDone = AtomicBoolean(false)
+                val allDone = AtomicBoolean(false)
                 val error = AtomicReference<Throwable?>(null)
                 val sent = AtomicLong(0)
                 val pool = Executors.newFixedThreadPool(PARALLEL_CHUNKS)
@@ -79,16 +84,18 @@ class TransferClient {
                                 if (aborted.get()) break
                                 val task = queue.poll(300, TimeUnit.MILLISECONDS)
                                 if (task == null) {
-                                    if (readersDone.get() && queue.isEmpty()) break
+                                    if (allDone.get() && queue.isEmpty()) break
                                     continue
                                 }
                                 val index = task.sessionIndex
-                                val session = sessions[index]
+                                val session = sessionArray.get(index) ?: continue
                                 postChunk(session.base, session.transferID, task.offset, task.data)
                                 val totalSent = sent.addAndGet(task.data.size.toLong())
                                 onProgress(totalSent, total, session.file.name)
                                 if (remaining.decrementAndGet(index) == 0) {
+                                    // finish 之后接收端才会释放这个文件的会话槽位
                                     finish(session.base, session.transferID)
+                                    task.waveFinished.incrementAndGet()
                                 }
                             }
                         } catch (t: Throwable) {
@@ -100,36 +107,80 @@ class TransferClient {
                     }
                 }
 
-                val readers = prepared.mapIndexed { index, file ->
-                    thread(name = "macdrop-read-$index") {
-                        try {
-                            resolver.openInputStream(file.uri)?.use { input ->
-                                val buffer = ByteArray(CHUNK_SIZE)
-                                var offset = 0L
-                                while (!aborted.get()) {
-                                    var filled = 0
-                                    while (filled < buffer.size) {
-                                        val count = input.read(buffer, filled, buffer.size - filled)
-                                        if (count < 0) break
-                                        filled += count
-                                    }
-                                    if (filled == 0) break
-                                    val chunk = buffer.copyOf(filled)
+                // 分批建会话：接收端同时在收的文件数有上限（8），
+                // 一次把几十个文件的会话全建起来会撞上限被拒，整个传输就失败了。
+                // 改成「建一批 → 把这批传完（finish 会释放槽位）→ 再建下一批」，
+                // 一次拖选多少个文件都能发。
+                var index = 0
+                while (index < prepared.size && !aborted.get()) {
+                    val end = minOf(index + SESSION_WAVE_SIZE, prepared.size)
+                    val waveIndices = (index until end).toList()
+                    val waveFinished = AtomicInteger(0)
+
+                    for (i in waveIndices) {
+                        val file = prepared[i]
+                        val id = UUID.randomUUID().toString()
+                        val root = if (file.relativePath.contains('/')) {
+                            file.relativePath.substringBefore('/')
+                        } else {
+                            null
+                        }
+                        val base = announce(
+                            bases, id, file, root, batchID, senderName, prepared.size, total
+                        )
+                        val session = Session(file, id, base)
+                        sessions += session
+                        sessionArray.set(i, session)
+                    }
+
+                    // 空文件没有分块，直接收尾
+                    for (i in waveIndices.filter { prepared[it].size == 0L }) {
+                        val session = sessionArray.get(i) ?: continue
+                        finish(session.base, session.transferID)
+                        waveFinished.incrementAndGet()
+                    }
+
+                    val readers = waveIndices.map { i ->
+                        thread(name = "macdrop-read-$i") {
+                            try {
+                                resolver.openInputStream(prepared[i].uri)?.use { input ->
+                                    val buffer = ByteArray(CHUNK_SIZE)
+                                    var offset = 0L
                                     while (!aborted.get()) {
-                                        if (queue.offer(ChunkTask(index, offset, chunk), 300, TimeUnit.MILLISECONDS)) break
+                                        var filled = 0
+                                        while (filled < buffer.size) {
+                                            val count = input.read(buffer, filled, buffer.size - filled)
+                                            if (count < 0) break
+                                            filled += count
+                                        }
+                                        if (filled == 0) break
+                                        val chunk = buffer.copyOf(filled)
+                                        while (!aborted.get()) {
+                                            if (queue.offer(
+                                                    ChunkTask(i, offset, chunk, waveFinished),
+                                                    300, TimeUnit.MILLISECONDS
+                                                )
+                                            ) break
+                                        }
+                                        offset += filled
                                     }
-                                    offset += filled
-                                }
-                            } ?: throw IOException(MoonStrings.f("无法读取 %s", file.name))
-                        } catch (t: Throwable) {
-                            error.compareAndSet(null, t)
-                            aborted.set(true)
+                                } ?: throw IOException(MoonStrings.f("无法读取 %s", prepared[i].name))
+                            } catch (t: Throwable) {
+                                error.compareAndSet(null, t)
+                                aborted.set(true)
+                            }
                         }
                     }
+                    readers.forEach { it.join() }
+
+                    // 等这一批的文件全部收尾，接收端腾出槽位后再建下一批
+                    while (waveFinished.get() < waveIndices.size && !aborted.get()) {
+                        Thread.sleep(50)
+                    }
+                    index = end
                 }
 
-                readers.forEach { it.join() }
-                readersDone.set(true)
+                allDone.set(true)
                 workers.await()
                 pool.shutdown()
 
@@ -148,8 +199,6 @@ class TransferClient {
             }
         }
     }
-
-    private data class ChunkTask(val sessionIndex: Int, val offset: Long, val data: ByteArray)
 
     private fun chunkCount(size: Long): Int = ((size + CHUNK_SIZE - 1) / CHUNK_SIZE).toInt()
 
@@ -180,19 +229,35 @@ class TransferClient {
         batchBytes: Long
     ): String {
         var lastError: Exception? = null
+        // 对方忙（同时在收的文件太多）时的等待上限
+        val busyDeadline = System.currentTimeMillis() + BUSY_RETRY_TIMEOUT_MS
         for (round in 0..1) {
-            for (base in bases) {
+            var baseIndex = 0
+            while (baseIndex < bases.size) {
+                val base = bases[baseIndex]
                 try {
-                    if (announceOnce(base, transferID, file, root, batchID, senderName, fileCount, batchBytes)) {
-                        return base
+                    when (announceOnce(base, transferID, file, root, batchID, senderName, fileCount, batchBytes)) {
+                        BeginState.ACCEPTED -> return base
+                        BeginState.PENDING -> return awaitAcceptance(
+                            base, transferID, file, root, batchID, senderName, fileCount, batchBytes
+                        )
+                        BeginState.BUSY -> {
+                            // 对方同时在收的文件太多：等它传完一个文件腾出槽位再重试。
+                            // 本批只建了 4 个会话（远小于对方上限 8），
+                            // 所以等的一定是对方其它传输释放出来的槽位，不会自己把自己堵死。
+                            if (System.currentTimeMillis() >= busyDeadline) {
+                                throw IOException(MoonStrings.t("对方正在接收其它文件，请稍后重试"))
+                            }
+                            Thread.sleep(BUSY_RETRY_INTERVAL_MS)
+                            continue
+                        }
                     }
-                    return awaitAcceptance(
-                        base, transferID, file, root, batchID, senderName, fileCount, batchBytes
-                    )
                 } catch (error: ConfirmationRejected) {
                     throw error
                 } catch (error: Exception) {
                     lastError = error
+                    // 这个地址连不上，换下一个
+                    baseIndex += 1
                 }
             }
             if (round == 0) Thread.sleep(400)
@@ -215,8 +280,10 @@ class TransferClient {
         var lastError: Exception? = null
         while (System.currentTimeMillis() < deadline) {
             try {
-                if (announceOnce(base, transferID, file, root, batchID, senderName, fileCount, batchBytes)) {
-                    return base
+                when (announceOnce(base, transferID, file, root, batchID, senderName, fileCount, batchBytes)) {
+                    BeginState.ACCEPTED -> return base
+                    // 还在等确认（或者对方正忙），继续轮询
+                    BeginState.PENDING, BeginState.BUSY -> Unit
                 }
             } catch (error: ConfirmationRejected) {
                 throw error
@@ -237,7 +304,7 @@ class TransferClient {
         senderName: String,
         fileCount: Int,
         batchBytes: Long
-    ): Boolean {
+    ): BeginState {
         val query = listOf(
             "id" to transferID,
             "name" to file.name,
@@ -257,11 +324,15 @@ class TransferClient {
         return when (connection.responseCode) {
             HttpURLConnection.HTTP_OK -> {
                 check(connection)
-                true
+                BeginState.ACCEPTED
             }
             HttpURLConnection.HTTP_ACCEPTED -> {
                 check(connection)
-                false
+                BeginState.PENDING
+            }
+            429 -> {
+                // 对方同时在收的文件太多：等它传完一个文件腾出槽位
+                BeginState.BUSY
             }
             else -> {
                 val message = responseText(connection)
@@ -353,5 +424,21 @@ class TransferClient {
         private const val CHUNK_SIZE = 2 * 1024 * 1024
         private const val PARALLEL_CHUNKS = 3
         private const val CONFIRM_TIMEOUT_MS = 300_000L
+
+        /**
+         * 一次建立多少个接收会话。
+         *
+         * 接收端同时在收的文件数有上限（8，见 ReceiverServer 的 MAX_SESSIONS），
+         * 一次把几十个文件的会话全建起来会撞上上限，被拒后整个传输失败。
+         * 改成「建一批 → 传完这批（finish 会让接收端释放会话）→ 再建下一批」，
+         * 任意数量的文件都能发，而且不用改协议、对旧版本接收端同样有效。
+         * 取 4：既能撑满分块并发，又给对方留一半余量给其它发送方。
+         */
+        private const val SESSION_WAVE_SIZE = 4
+
+        /** 对方忙时的重试间隔 */
+        private const val BUSY_RETRY_INTERVAL_MS = 300L
+        /** 对方忙时最多重试多久（对方传完一个文件就会释放一个会话） */
+        private const val BUSY_RETRY_TIMEOUT_MS = 30_000L
     }
 }

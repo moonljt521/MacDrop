@@ -18,6 +18,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     var onSend: (([URL], Peer) -> Void)?
     var onReceived: ((URL) -> Void)?
+    /// 设备列表变化时回调（测试钩子 MACDROP_AUTO_SEND 用它找到对端）
+    var onPeersUpdated: (([Peer]) -> Void)?
 
     private var peers: [Peer] = []
     private var scanning = false
@@ -48,6 +50,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             self?.peers = peers
             self?.panel.updatePeers(peers)
             self?.rebuildMenu()
+            self?.onPeersUpdated?(peers)
         }
 
         bonjour.advertise(name: cfg.deviceName, port: cfg.port)

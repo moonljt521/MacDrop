@@ -113,6 +113,27 @@ final class TransferEngine {
 
     // MARK: - 发送端
 
+    /// 一次建立多少个接收会话。
+    ///
+    /// 接收端同时在收的文件数有上限（8，见 AppDelegate 的 pendingMeta 上限），
+    /// 一次把几十个文件的会话全建起来会撞上上限，被拒后整个传输失败。
+    /// 改成「建一批 → 传完这批（finish 会让接收端释放会话）→ 再建下一批」，
+    /// 任意数量的文件都能发，而且不用改协议、对旧版本接收端同样有效。
+    /// 取 4：既能撑满分块并发，又给对方留一半余量给其它发送方。
+    private static let sessionWaveSize = 4
+
+    /// 对方忙（同时在收的文件太多）时的重试间隔
+    private static let busyRetryInterval: TimeInterval = 0.3
+    /// 对方忙时最多重试多久（对方传完一个文件就会释放一个会话）
+    private static let busyRetryTimeout: TimeInterval = 30
+
+    /// 一次 begin 的结果
+    private enum BeginState {
+        case accepted   // 200：会话已建立
+        case pending    // 202：等对方确认
+        case busy       // 429：对方同时在收的文件太多，稍后重试
+    }
+
     /// 把一批文件推送到对端：先为每个文件建会话，再分块并发发送。
     /// 分块自带偏移，接收端按偏移随机写，所以同一文件的块可以乱序到达。
     func send(items: [FileItem],
@@ -146,35 +167,72 @@ final class TransferEngine {
             }
         }
 
-        var sessions: [SendSession] = []
+        // 已建立的所有会话；中途失败时统一 abort，不给接收端留下占位的会话
+        var opened: [SendSession] = []
+        func abortAll() {
+            for session in opened { TransferEngine.abort(transferID: session.transferID, baseURL: session.base) }
+        }
 
-        func announceNext(_ index: Int) {
-            guard index < items.count else {
-                runParallelSend(sessions: sessions, report: report, completion: completion)
+        var nextIndex = 0
+
+        /// 逐个建立这一批文件的会话；有一个失败就整体失败
+        func announceWave(_ wave: [FileItem], onReady: @escaping ([SendSession]) -> Void) {
+            var waveSessions: [SendSession] = []
+            func step(_ index: Int) {
+                guard index < wave.count else { onReady(waveSessions); return }
+                let item = wave[index]
+                let transferID = UUID().uuidString
+                // 目录拖放：把最外层目录名告诉接收端，让它保持目录结构
+                let rootName = item.relativePath.contains("/")
+                    ? String(item.relativePath.split(separator: "/").first ?? "")
+                    : nil
+
+                announce(bases: bases, transferID: transferID, fileName: item.url.lastPathComponent,
+                         relPath: item.relativePath, total: item.size, rootName: rootName,
+                         batchID: batchID, fileCount: items.count, batchBytes: total) { result in
+                    switch result {
+                    case .failure(let error):
+                        NSLog("[MoonDrop] 发送失败 \(item.url.lastPathComponent): \(error)")
+                        abortAll()
+                        completion(.failure(error))
+                    case .success(let base):
+                        let session = SendSession(item: item, transferID: transferID, base: base)
+                        opened.append(session)
+                        waveSessions.append(session)
+                        step(index + 1)
+                    }
+                }
+            }
+            step(0)
+        }
+
+        /// 一批一批地发：每批先建会话，再把这批文件传完
+        /// （每个文件 finish 后接收端就会释放它的会话槽位）
+        func sendWave() {
+            guard nextIndex < items.count else {
+                completion(.success(()))
                 return
             }
-            let item = items[index]
-            let transferID = UUID().uuidString
-            // 目录拖放：把最外层目录名告诉接收端，让它保持目录结构
-            let rootName = item.relativePath.contains("/")
-                ? String(item.relativePath.split(separator: "/").first ?? "")
-                : nil
-
-            announce(bases: bases, transferID: transferID, fileName: item.url.lastPathComponent,
-                     relPath: item.relativePath, total: item.size, rootName: rootName,
-                     batchID: batchID, fileCount: items.count, batchBytes: total) { result in
-                switch result {
-                case .failure(let error):
-                    NSLog("[MoonDrop] 发送失败 \(item.url.lastPathComponent): \(error)")
-                    for session in sessions { TransferEngine.abort(transferID: session.transferID, baseURL: session.base) }
-                    completion(.failure(error))
-                case .success(let base):
-                    sessions.append(SendSession(item: item, transferID: transferID, base: base))
-                    announceNext(index + 1)
+            let end = min(nextIndex + TransferEngine.sessionWaveSize, items.count)
+            let wave = Array(items[nextIndex..<end])
+            nextIndex = end
+            announceWave(wave) { waveSessions in
+                // 挪到后台队列跑：announceWave 的回调多半在 URLSession 的回调队列上，
+                // 那条队列是串行的，这上面不能有阻塞等网络回调的调用
+                DispatchQueue.global().async {
+                    self.runParallelSend(sessions: waveSessions, report: report) { result in
+                        switch result {
+                        case .failure(let error):
+                            abortAll()
+                            completion(.failure(error))
+                        case .success:
+                            sendWave()
+                        }
+                    }
                 }
             }
         }
-        announceNext(0)
+        sendWave()
     }
 
     /// 并发发送所有分块；某个文件的最后一块发完后再给它发 finish。
@@ -193,19 +251,18 @@ final class TransferEngine {
             perFile.append(count)
             var offset: Int64 = 0
             for _ in 0..<count {
-                works.append(ChunkWork(sessionIndex: index, offset: offset))
+                let length = Int(min(Int64(chunkSize), session.item.size - offset))
+                works.append(ChunkWork(sessionIndex: index, offset: offset, length: length))
                 offset += Int64(chunkSize)
             }
         }
 
-        // 空文件没有分块，直接收尾
-        for (index, session) in sessions.enumerated() where perFile[index] == 0 {
-            do {
-                try TransferEngine.postFinish(baseURL: session.base, transferID: session.transferID)
-            } catch {
-                completion(.failure(error))
-                return
-            }
+        // 空文件没有分块可发，但 begin 已经建好会话了，差一个 finish。
+        // 这个 finish 必须交给工作线程去做，不能在调用方线程里阻塞等网络回调：
+        // 调用方多半正跑在 URLSession 的回调队列上，那条队列是串行的，
+        // 在回调里阻塞等另一个请求的回调会直接死锁（收发都卡住）。
+        for (index, _) in sessions.enumerated() where perFile[index] == 0 {
+            works.append(ChunkWork(sessionIndex: index, offset: 0, length: 0))
         }
 
         let queue = ChunkQueue(works)
@@ -222,9 +279,15 @@ final class TransferEngine {
                     guard let work = queue.next() else { return }
                     let session = sessions[work.sessionIndex]
                     do {
+                        if work.length == 0 {
+                            // 空文件：没有分块，会话已建好，直接收尾
+                            try TransferEngine.postFinish(baseURL: session.base,
+                                                         transferID: session.transferID)
+                            continue
+                        }
                         let data = try TransferEngine.readChunk(at: session.item.url,
                                                              offset: work.offset,
-                                                             length: Int64(self.chunkSize))
+                                                             length: Int64(work.length))
                         try TransferEngine.postChunk(baseURL: session.base, transferID: session.transferID,
                                                     offset: work.offset, data: data)
                         report(Int64(data.count), session.item.url.lastPathComponent)
@@ -242,7 +305,7 @@ final class TransferEngine {
         group.notify(queue: .main) {
             if let error = failure.value {
                 NSLog("[MoonDrop] 上传中断: \(error)")
-                for session in sessions { TransferEngine.abort(transferID: session.transferID, baseURL: session.base) }
+                // 会话由调用方统一 abort（它知道所有批次建了哪些会话）
                 completion(.failure(error))
             } else {
                 completion(.success(()))
@@ -260,6 +323,8 @@ final class TransferEngine {
     private struct ChunkWork {
         let sessionIndex: Int
         let offset: Int64
+        /// 0 表示空文件：没有分块，会话建好后直接收尾
+        let length: Int
     }
 
     /// 线程安全的累计进度
@@ -365,6 +430,8 @@ final class TransferEngine {
         // 首选地址（通常是可路由的 IPv4）的错误更有诊断价值；
         // 备选的 IPv6/AWDL 地址失败得早，别让它盖住真正原因
         let firstError = ErrorBox()
+        // 对方忙（同时在收的文件太多）时的等待上限
+        let busyDeadline = Date().addingTimeInterval(TransferEngine.busyRetryTimeout)
 
         func attempt(_ index: Int, round: Int) {
             guard index < bases.count else {
@@ -382,14 +449,28 @@ final class TransferEngine {
                          relPath: relPath, total: total, rootName: rootName, batchID: batchID,
                          fileCount: fileCount, batchBytes: batchBytes, baseURL: base) { result in
                 switch result {
-                case .success(let accepted):
-                    if accepted {
+                case .success(let state):
+                    switch state {
+                    case .accepted:
                         completion(.success(base))
-                    } else {
+                    case .pending:
                         self.awaitAcceptance(transferID: transferID, fileName: fileName, relPath: relPath,
                                              total: total, rootName: rootName, batchID: batchID,
                                              fileCount: fileCount, batchBytes: batchBytes, baseURL: base,
                                              deadline: Date().addingTimeInterval(300), completion: completion)
+                    case .busy:
+                        // 对方同时在收的文件太多：等它传完一个文件腾出槽位再重试。
+                        // 本批只建了 4 个会话（远小于对方上限 8），
+                        // 所以等的一定是对方其它传输释放出来的槽位，不会自己把自己堵死。
+                        guard Date() < busyDeadline else {
+                            completion(.failure(NSError(domain: "MoonDrop", code: 429, userInfo: [
+                                NSLocalizedDescriptionKey: "对方正在接收其它文件，请稍后重试"
+                            ])))
+                            return
+                        }
+                        DispatchQueue.global().asyncAfter(deadline: .now() + TransferEngine.busyRetryInterval) {
+                            attempt(index, round: round)
+                        }
                     }
                 case .failure(let error):
                     NSLog("[MoonDrop] 连接失败 \(base): \(error)")
@@ -417,10 +498,12 @@ final class TransferEngine {
                               total: total, rootName: rootName, batchID: batchID, fileCount: fileCount,
                               batchBytes: batchBytes, baseURL: baseURL) { result in
                 switch result {
-                case .success(let accepted):
-                    if accepted {
+                case .success(let state):
+                    switch state {
+                    case .accepted:
                         completion(.success(baseURL))
-                    } else {
+                    case .pending, .busy:
+                        // 还在等确认（或者对方正忙），继续轮询
                         self.awaitAcceptance(transferID: transferID, fileName: fileName, relPath: relPath,
                                              total: total, rootName: rootName, batchID: batchID,
                                              fileCount: fileCount, batchBytes: batchBytes, baseURL: baseURL,
@@ -473,7 +556,7 @@ final class TransferEngine {
     private func announceOnce(transferID: String, fileName: String, relPath: String,
                               total: Int64, rootName: String?, batchID: String, fileCount: Int,
                               batchBytes: Int64, baseURL: String,
-                              completion: @escaping (Result<Bool, Error>) -> Void) {
+                              completion: @escaping (Result<BeginState, Error>) -> Void) {
         var comps = URLComponents()
         comps.queryItems = [
             .init(name: "name", value: fileName),
@@ -496,8 +579,12 @@ final class TransferEngine {
             guard let code = (resp as? HTTPURLResponse)?.statusCode else {
                 return completion(.failure(URLError(.badServerResponse)))
             }
-            if code == 200 { return completion(.success(true)) }
-            if code == 202 { return completion(.success(false)) }
+            if code == 200 { return completion(.success(.accepted)) }
+            if code == 202 { return completion(.success(.pending)) }
+            if code == 429 {
+                // 对方同时在收的文件太多：等它传完一个文件腾出槽位
+                return completion(.success(.busy))
+            }
             if code == 403 {
                 let text = data.flatMap { String(data: $0, encoding: .utf8) } ?? "对方已拒绝接收"
                 return completion(.failure(NSError(domain: "MoonDrop", code: 403, userInfo: [

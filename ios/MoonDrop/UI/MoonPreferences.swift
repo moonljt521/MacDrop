@@ -310,6 +310,7 @@ enum MoonStrings {
         // MARK: 接收端 / 发送端
         "文件不完整：已收 %lld / %lld 字节": "Incomplete file: received %lld of %lld bytes",
         "读取文件时提前结束": "File ended unexpectedly while reading",
+        "对方正在接收其它文件，请稍后重试": "The other device is receiving other files. Try again shortly.",
         "%@（对方可能在后台或已离线，请在对方屏幕上打开 MoonDrop）":
             "%@ (The other device may be in the background or offline. Open MoonDrop on its screen.)"
     ]

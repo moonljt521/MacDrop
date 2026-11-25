@@ -78,7 +78,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.notifyReceived(url)
         }
 
+        installAutoSendIfNeeded()
         installUIProbeIfNeeded()
+    }
+
+    /// 测试钩子：MACDROP_AUTO_SEND="<对端设备名>:<文件路径,文件路径,...>"
+    /// 找到同名对端后自动把这些文件发过去，用来跑真实的端到端回归测试
+    /// （例如「一次拖选十几个文件」这种多文件场景）。
+    /// 正常运行时该环境变量不存在，此方法直接返回，不影响任何功能。
+    private func installAutoSendIfNeeded() {
+        guard let spec = ProcessInfo.processInfo.environment["MACDROP_AUTO_SEND"], !spec.isEmpty else { return }
+        let parts = spec.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else {
+            Logger.write("自动发送钩子：参数格式应为「设备名:文件路径,文件路径」")
+            return
+        }
+        let targetName = parts[0]
+        let urls = parts[1].split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .map { URL(fileURLWithPath: $0) }
+        guard !urls.isEmpty else { return }
+        var fired = false
+        status.onPeersUpdated = { [weak self] peers in
+            guard !fired else { return }
+            guard let peer = peers.first(where: { $0.name == targetName }) else { return }
+            fired = true
+            Logger.write("自动发送钩子：向 \(peer.name) 发送 \(urls.count) 个文件")
+            self?.send(urls, to: peer)
+        }
     }
 
     /// 测试钩子：MACDROP_UI_PROBE=<目录> 时，按顺序输出收起 / 展开两种状态的
