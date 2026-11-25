@@ -77,6 +77,24 @@ xcodegen generate
 open MoonDropMobile.xcodeproj      # pick a team, then run on a device
 ```
 
+Command-line release build (and install on a device):
+
+```bash
+cd ios
+xcodegen generate
+xcodebuild -project MoonDropMobile.xcodeproj -target MoonDropMobile \
+    -sdk iphoneos26.2 -configuration Release build
+# product: ios/build/Release-iphoneos/MoonDrop.app
+xcrun devicectl device install app --device <device-id> \
+    ios/build/Release-iphoneos/MoonDrop.app
+```
+
+> Use `-target ... -sdk ...` rather than `-scheme ... -destination ...`: the latter has to
+> resolve a device destination and fails with "iOS 26.2 is not installed" on machines
+> without an iOS simulator runtime. The code also uses a SwiftUI API that only exists in
+> iOS 26 (`sharedBackgroundVisibility`), so it must be compiled with an Xcode 26+ SDK —
+> Xcode 16.2 fails with "no member 'sharedBackgroundVisibility'".
+
 The Local Network permission is requested on first launch. Received files are in **Files → On My iPhone → MoonDrop → Received**.
 
 ### Android
@@ -132,6 +150,7 @@ To send from another app, use **Share → MoonDrop** (Android) or **Open in / Sh
 cd macos
 ./test-e2e.sh 52399      # chunked transfer, SHA256, name collision, staging cleanup
 ./test-discovery.sh      # two instances: discovery, no self-discovery, same-name peers
+./test-multi-file.sh     # many files: a selection larger than the receiver's session limit still arrives
 ```
 
 ## Security
@@ -171,3 +190,6 @@ tools/    icon generator
 - Distribute the zip rather than the `.app` directory, so AppleDouble files do not break the signature.
 - Android gallery duplicates: `MediaStore` collections are MIME-based views of a single table, so a JPG written under `Download/` is already indexed by gallery apps. Never "save a second copy into `Pictures/`" — write media straight into its final album directory once, and have the received list query all destination directories.
 - Clearing received must not delete gallery assets: Android deletes only the `Downloads` entries and records a clear timestamp (seconds); the `Images`/`Video` queries add `DATE_ADDED > clearedAt` (timestamp is shifted back 1s so a file arriving in the same second is not hidden forever). Older photos stay in the library while the list looks empty.
+- The receiver caps how many files it accepts at once (8). A sender that opens every file's session up front gets the 9th rejected (429) and the whole transfer fails — so sessions are now opened in waves: open a wave, transfer it (`finish` frees the receiver's slots), then open the next. `macos/test-multi-file.sh` covers this.
+- On macOS, never block inside a `URLSession` callback waiting for another request: completion handlers run on a **serial** queue, so a `semaphore.wait()` for the next request's callback deadlocks (it looks like "every session was created but not a single chunk went out"). An empty file's final `finish` has to run on a worker thread, never on the callback thread.
+- The iOS icon is not in an `AppIcon.appiconset` but shipped as loose PNGs declared through `CFBundleIconFiles`: actool has to thin an icon set with device idioms for the simulator platform as well, which requires a simulator runtime to be installed (without one it fails with "No available simulator runtimes for platform iphonesimulator"). The asset catalog keeps only the 1024 marketing icon and the device-sized PNGs ship as ordinary resources. **Switch back to an asset-catalog icon on a machine that has a simulator runtime installed.**

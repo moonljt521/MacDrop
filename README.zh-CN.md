@@ -77,6 +77,23 @@ xcodegen generate
 open MoonDropMobile.xcodeproj      # 选择开发团队后运行到真机
 ```
 
+命令行出 release 包（真机安装）：
+
+```bash
+cd ios
+xcodegen generate
+xcodebuild -project MoonDropMobile.xcodeproj -target MoonDropMobile \
+    -sdk iphoneos26.2 -configuration Release build
+# 产物：ios/build/Release-iphoneos/MoonDrop.app
+xcrun devicectl device install app --device <设备ID> \
+    ios/build/Release-iphoneos/MoonDrop.app
+```
+
+> 用 `-target ... -sdk ...` 而不是 `-scheme ... -destination ...`：后者要解析设备目标，
+> 在没装 iOS 模拟器 runtime 的机器上会报「iOS 26.2 is not installed」而直接失败。
+> 另外代码用了 iOS 26 才有的 SwiftUI API（`sharedBackgroundVisibility`），
+> 编译必须用 Xcode 26+ 的 SDK，用 Xcode 16.2 会报符号不存在。
+
 首次启动会请求「本地网络」权限。收到的文件位于 **文件 → 我的 iPhone → MoonDrop → Received**。
 
 ### Android
@@ -132,6 +149,7 @@ keyPassword=…
 cd macos
 ./test-e2e.sh 52399      # 分块传输、SHA256、同名避让、暂存清理
 ./test-discovery.sh      # 双实例：互相发现、不自发现、同名设备
+./test-multi-file.sh     # 多文件：一次拖选超过接收端并发上限也能全部送达
 ```
 
 ## 安全
@@ -171,3 +189,6 @@ tools/    图标生成脚本
 - 分发 zip 而非 `.app` 目录，避免 AppleDouble 文件破坏签名。
 - Android 相册重复：`MediaStore` 的集合只是同一张表按 MIME 划分的视图，放在 `Download/` 里的 JPG 同样会被图库索引。别再「先存下载、再复制一份到 `Pictures/`」——在 `save()` 里一次性把媒体写进最终相册目录，并让已接收列表同时查询所有落点目录。
 - 清空不能删相册资产：Android 只删 `Downloads` 条目并记一个清空时间戳（秒），`Images` / `Video` 查询加 `DATE_ADDED > 清空时间`（时间戳回退 1 秒，避免同一秒新收的文件被永久隐藏）。旧照片留在系统相册，列表看起来是空的。
+- 接收端同时在收的文件数有上限（8）。发送端如果一次性把所有文件的会话都建出来，第 9 个会被拒（429）导致整个传输失败 —— 现在改成分批建会话：建一批 → 传完这批（`finish` 会让接收端释放槽位）→ 再建下一批。`macos/test-multi-file.sh` 覆盖这一条。
+- macOS 发送端不要在 `URLSession` 的回调里阻塞等另一个请求：它的完成回调跑在**串行**队列上，在回调里 `semaphore.wait()` 等下一个请求的回调会直接死锁（表现为「会话都建好了，但一个分块都发不出去」）。空文件的收尾必须交给工作线程做，不能在回调线程上做。
+- iOS 图标没有放在资源目录的 `AppIcon.appiconset` 里，而是用散装 PNG + `CFBundleIconFiles` 声明：actool 编译含设备 idiom 的图标集时要把模拟器平台一起裁剪，强制要求本机装过模拟器 runtime（没有就报 `No available simulator runtypes for platform iphonesimulator`）。资源目录里只留 1024 的 marketing 图标，设备尺寸的 PNG 作为普通资源打包。**在装了模拟器 runtime 的机器上建议改回资源目录图标**。
