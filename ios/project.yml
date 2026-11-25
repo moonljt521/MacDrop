@@ -11,6 +11,10 @@ settings:
     MARKETING_VERSION: "1.6.1"
     CURRENT_PROJECT_VERSION: "4"
     SWIFT_VERSION: "5.0"
+    # 显式声明支持的平台：Xcode 自动生成的 scheme 会因为这个为空而
+    # 报「scheme 的 buildable 没有支持的平台」，导致 generic/platform=iOS
+    # 找不到目标。写明确之后目标解析才稳定。
+    SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
 
 targets:
   MoonDropMobile:

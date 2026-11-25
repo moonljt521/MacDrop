@@ -10,6 +10,36 @@
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<!--
+	  图标走「散装 PNG」而不是资源目录：
+	  actool 编译含设备 idiom 的图标集时，要连带把模拟器平台一起裁剪，
+	  因此强制要求本机装过模拟器 runtime（actool 会直接报
+	  "No available simulator runtimes for platform iphonesimulator"）。
+	  这里改成 AppIcon.appiconset 只留 1024 的 marketing 图标（actool 能编），
+	  设备尺寸的 PNG 以普通资源打包，用 CFBundleIconFiles 声明，效果一致。
+	-->
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array>
+				<string>AppIcon60x60@2x</string>
+				<string>AppIcon60x60@3x</string>
+				<string>AppIcon76x76@1x</string>
+				<string>AppIcon76x76@2x</string>
+			</array>
+			<key>UIPrerenderedIcon</key>
+			<false/>
+		</dict>
+	</dict>
+	<key>CFBundleIconFiles</key>
+	<array>
+		<string>AppIcon60x60@2x</string>
+		<string>AppIcon60x60@3x</string>
+		<string>AppIcon76x76@1x</string>
+		<string>AppIcon76x76@2x</string>
+	</array>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
