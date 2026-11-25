@@ -23,6 +23,8 @@ android/.gradle/
 android/local.properties
 android/.idea/
 android/**/build/
+# 构建产物（安装包）不入库：体积大，且每次构建都会变化
+android/outputs/
 # 正式签名材料与口令不入库
 android/keystore/
 android/keystore.properties
